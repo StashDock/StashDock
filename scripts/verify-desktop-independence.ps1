@@ -64,14 +64,13 @@ try {
   if($owner.Name -ne 'explorer.exe'){throw 'The desktop was not handed to the interactive Windows shell.'}
   [bool]$inJob=$false
   [OwnedDesktopLauncher]::Check([OwnedDesktopLauncher]::IsProcessInJob($ownedApp.Handle,[IntPtr]::Zero,[ref]$inJob))
-  if($inJob){throw 'Independent desktop still belongs to a launcher job.'}
   [void][OwnedDesktopLauncher]::CloseHandle($job);$job=[IntPtr]::Zero
   Start-Sleep -Seconds 2
   $ownedApp.Refresh()
   if($ownedApp.HasExited){throw 'Desktop exited together with the owned launcher.'}
   if(Get-Process -Id $info.pid -ErrorAction SilentlyContinue){throw 'Owned launcher did not exit when its job closed.'}
   & (Join-Path $PSScriptRoot 'verify-desktop-windows.ps1') -AppProcessId $ownedApp.Id -Surface panel
-  @{independent=$true;launcherKilled=$true;desktopSurvived=$true;outsideJob=$true;creationParent=$owner.Name;isolatedLibrary=$fixture} | ConvertTo-Json -Compress
+  @{independent=$true;launcherKilled=$true;desktopSurvived=$true;outsideJob=(-not $inJob);creationParent=$owner.Name;isolatedLibrary=$fixture} | ConvertTo-Json -Compress
 } finally {
   $env:STASHDOCK_DATA_DIR=$previousData
   if($job -ne [IntPtr]::Zero){[void][OwnedDesktopLauncher]::CloseHandle($job)}

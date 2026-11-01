@@ -27,7 +27,7 @@ fn main() {
                 };
                 let title: Vec<u16> = "StashDock\0".encode_utf16().collect();
                 let message: Vec<u16> =
-                    format!("{error}\nOpen StashDock from Windows Explorer and try again.\0")
+                    format!("{error}\nRestart Windows Explorer, then try again.\0")
                         .encode_utf16()
                         .collect();
                 unsafe {

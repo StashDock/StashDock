@@ -1,7 +1,7 @@
 {
   "name": "stashdock",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "scripts": {
     "extension:build": "npm run assets:ui && node scripts/build-browser-extensions.mjs",

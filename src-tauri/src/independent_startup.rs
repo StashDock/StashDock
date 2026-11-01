@@ -4,20 +4,18 @@
 mod windows {
     use std::{ffi::OsStr, mem, os::windows::ffi::OsStrExt, path::Path, ptr};
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, HANDLE},
-        System::{JobObjects::IsProcessInJob, Threading::*},
+        Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE},
+        System::{
+            Diagnostics::ToolHelp::{
+                CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+                TH32CS_SNAPPROCESS,
+            },
+            Threading::*,
+        },
         UI::WindowsAndMessaging::{GetShellWindow, GetWindowThreadProcessId},
     };
     fn wide(value: &OsStr) -> Vec<u16> {
         value.encode_wide().chain(Some(0)).collect()
-    }
-    pub fn in_job(process: HANDLE) -> std::io::Result<bool> {
-        let mut result = 0;
-        // SAFETY: process is a live owned handle or the current-process pseudo handle.
-        if unsafe { IsProcessInJob(process, ptr::null_mut(), &mut result) } == 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(result != 0)
     }
     pub struct Child {
         pub process: HANDLE,
@@ -31,13 +29,52 @@ mod windows {
             }
         }
     }
-    pub fn needs_handoff(marked: bool, in_launcher_job: bool) -> std::io::Result<bool> {
-        if marked && in_launcher_job {
+    fn parent_process_id(process_id: u32) -> std::io::Result<u32> {
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+        if snapshot == INVALID_HANDLE_VALUE {
+            return Err(std::io::Error::last_os_error());
+        }
+        let result = (|| {
+            let mut entry: PROCESSENTRY32W = unsafe { mem::zeroed() };
+            entry.dwSize = mem::size_of::<PROCESSENTRY32W>() as u32;
+            if unsafe { Process32FirstW(snapshot, &mut entry) } == 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            loop {
+                if entry.th32ProcessID == process_id {
+                    return Ok(entry.th32ParentProcessID);
+                }
+                if unsafe { Process32NextW(snapshot, &mut entry) } == 0 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "The process creation parent could not be verified.",
+                    ));
+                }
+            }
+        })();
+        unsafe { CloseHandle(snapshot) };
+        result
+    }
+    fn shell_process_id() -> std::io::Result<u32> {
+        let mut pid = 0;
+        unsafe { GetWindowThreadProcessId(GetShellWindow(), &mut pid) };
+        if pid == 0 {
             return Err(std::io::Error::other(
-                "Independent startup still belongs to a launcher job.",
+                "The Windows desktop shell is unavailable.",
             ));
         }
-        Ok(!marked)
+        Ok(pid)
+    }
+    pub fn needs_handoff(marked: bool, parent_is_shell: bool) -> std::io::Result<bool> {
+        if !marked {
+            return Ok(true);
+        }
+        if !parent_is_shell {
+            return Err(std::io::Error::other(
+                "Independent startup was not created by the Windows desktop shell.",
+            ));
+        }
+        Ok(false)
     }
     pub fn from_shell(exe: &Path, suspended: bool) -> std::io::Result<Child> {
         from_shell_command(exe, "--stashdock-independent", suspended)
@@ -49,15 +86,7 @@ mod windows {
     ) -> std::io::Result<Child> {
         // Use the interactive Windows shell as the documented creation parent.
         // This launches only our own executable, without modifying or terminating Explorer.
-        let mut pid = 0;
-        unsafe {
-            GetWindowThreadProcessId(GetShellWindow(), &mut pid);
-        }
-        if pid == 0 {
-            return Err(std::io::Error::other(
-                "The Windows desktop shell is unavailable.",
-            ));
-        }
+        let pid = shell_process_id()?;
         let parent = unsafe { OpenProcess(PROCESS_CREATE_PROCESS, 0, pid) };
         if parent.is_null() {
             return Err(std::io::Error::last_os_error());
@@ -121,9 +150,9 @@ mod windows {
             // Verify before user code executes. Never leave a live replacement
             // behind if checking/resuming fails, and never inherit stdio handles.
             let activate = (|| {
-                if in_job(child.process)? {
+                if parent_process_id(info.dwProcessId)? != pid {
                     return Err(std::io::Error::other(
-                        "The shell launch still belongs to a launcher job.",
+                        "The Windows shell did not become the process creation parent.",
                     ));
                 }
                 if !suspended && unsafe { ResumeThread(child.thread) } == u32::MAX {
@@ -150,7 +179,14 @@ mod windows {
     }
     pub fn relaunch() -> std::io::Result<bool> {
         let marked = std::env::args_os().any(|arg| arg == "--stashdock-independent");
-        if !needs_handoff(marked, in_job(unsafe { GetCurrentProcess() })?)? {
+        let already_independent = if marked {
+            let shell_pid = shell_process_id()?;
+            let parent_is_shell = parent_process_id(unsafe { GetCurrentProcessId() })? == shell_pid;
+            !needs_handoff(true, parent_is_shell)?
+        } else {
+            false
+        };
+        if already_independent {
             return Ok(false);
         }
         let _child = from_shell(&std::env::current_exe()?, false)?;
@@ -160,23 +196,21 @@ mod windows {
     mod tests {
         use super::*;
         #[test]
-        fn initial_launch_is_always_handed_off_and_markers_cannot_bypass_job_validation() {
+        fn initial_launch_is_handed_off_and_markers_require_the_shell_parent() {
             assert!(needs_handoff(false, false).unwrap());
             assert!(needs_handoff(false, true).unwrap());
-            assert!(!needs_handoff(true, false).unwrap());
-            assert!(needs_handoff(true, true).is_err());
+            assert!(!needs_handoff(true, true).unwrap());
+            assert!(needs_handoff(true, false).is_err());
         }
         #[test]
-        fn standalone_shell_child_does_not_inherit_the_test_launchers_job() {
+        fn shell_child_is_created_suspended_with_explorer_as_parent() {
             // The child never runs code or opens a window. It is our suspended
             // test executable, not the actual user app or a user browser.
             let child = from_shell(&std::env::current_exe().unwrap(), true).unwrap();
-            let outside = in_job(child.process).unwrap();
             unsafe {
                 TerminateProcess(child.process, 0);
                 WaitForSingleObject(child.process, 5000);
             }
-            assert!(!outside, "Desktop launch inherited its parent's Job Object");
         }
     }
 }
@@ -191,13 +225,11 @@ pub fn spawn_connector(executable: &std::path::Path, root: &std::path::Path) -> 
         }
         let trailing = raw.chars().rev().take_while(|c| *c == '\\').count();
         let arguments = format!("--connector-worker \"{}{}\"", raw, "\\".repeat(trailing));
-        let child = windows::from_shell_command(executable, &arguments, false)
+        let _child = windows::from_shell_command(executable, &arguments, false)
             .map_err(|_| "The independent X connector could not start.".to_string())?;
-        if windows::in_job(child.process)
-            .map_err(|_| "The X connector could not be checked.".to_string())?
-        {
-            return Err("The X connector could not start independently.".into());
-        }
+        // `from_shell_command` verifies Explorer as the creation parent before
+        // resuming the process. Job association follows that specified parent,
+        // so a shell-owned job is valid and is not a launcher-lifetime leak.
         return Ok(());
     }
     #[cfg(not(windows))]
