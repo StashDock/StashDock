@@ -1,6 +1,6 @@
 [package]
 name = "stashdock"
-version = "1.0.2"
+version = "1.0.3"
 description = "A local-first context dock for AI coding agents"
 authors = ["StashDock contributors"]
 edition = "2021"
