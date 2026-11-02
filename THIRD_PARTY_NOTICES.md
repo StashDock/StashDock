@@ -1,6 +1,6 @@
 # UI dependency notices
 
-StashDock's project MIT license does not replace the licenses of its dependencies or fonts.
+StashDock's original application code is licensed under GNU AGPL v3 only. This does not replace the licenses of its dependencies, fonts or third-party assets. See LICENSING.md for scope and earlier MIT releases.
 
 - Arc's free components: Copyright (c) 2026 Elia Kuratli, MIT. Vendored under src/components/arc with the original license. Source: https://uiarc.dev/r/ and https://uiarc.dev/license. No Pro source is included.
 - Arc's development Skill and reference documents: Copyright (c) 2026 Elia Kuratli, MIT; the original license is retained in `.agents/skills/arc/LICENSE`.

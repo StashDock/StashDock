@@ -1,6 +1,7 @@
 {
   "name": "stashdock",
   "private": true,
+  "license": "AGPL-3.0-only",
   "version": "1.0.2",
   "type": "module",
   "scripts": {

@@ -25,7 +25,12 @@ for (const name of ['schema.sql', 'search-index.sql', 'preview-version.sql']) aw
 await cp(join(source, 'bin', platform), join(target, 'bin', platform), { recursive: true });
 await mkdir(join(destination, '.agents/plugins'), { recursive: true });
 await cp(resolve(root, '.agents/plugins/marketplace.json'), join(destination, '.agents/plugins/marketplace.json'));
-await cp(resolve(root, 'LICENSE'), join(destination, 'LICENSE'));
+for (const name of ['LICENSE', 'LICENSING.md', 'THIRD_PARTY_NOTICES.md']) {
+  await cp(resolve(root, name), join(destination, name));
+  await cp(resolve(root, name), join(target, name));
+}
+await mkdir(join(target, 'licenses'), { recursive: true });
+await cp(resolve(root, 'licenses/StashDock-legacy-MIT.txt'), join(target, 'licenses/StashDock-legacy-MIT.txt'));
 await cp(resolve(root, 'docs/macos-plugin-install.md'), join(destination, 'README.md'));
 for (const path of ['StashDockRenderer.app', 'stashdock-preview', 'stashdock-storage', 'stashdock-browser', 'node']) {
   const result = spawnSync('/usr/bin/codesign', ['--verify', '--strict', '--deep', join(target, 'bin', platform, path)], { stdio: 'inherit' });

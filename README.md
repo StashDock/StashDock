@@ -80,5 +80,5 @@ open **System Settings → Privacy & Security → Open Anyway**.
 Your library is stored on your device. You choose what to save and what to give
 AI. Different computers do not sync automatically.
 
-[MIT license](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md) ·
+[GNU AGPL v3 license](LICENSE) · [Licensing details](LICENSING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) ·
 [Privacy](https://stashdock.app/privacy)

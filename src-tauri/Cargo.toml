@@ -5,7 +5,7 @@ description = "A local-first context dock for AI coding agents"
 authors = ["StashDock contributors"]
 edition = "2021"
 default-run = "stashdock"
-license = "MIT"
+license = "AGPL-3.0-only"
 repository = "https://github.com/StashDock/StashDock"
 
 [[bin]]

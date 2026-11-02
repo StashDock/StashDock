@@ -58,6 +58,9 @@ export async function buildExtensions(browsers = productLinks.publicBrowserExten
     // Only the three named generated directories, never source or user profiles.
     await rm(directory, { recursive: true, force: true });
     await mkdir(directory, { recursive: true });
+    for (const name of ['LICENSE', 'LICENSING.md', 'THIRD_PARTY_NOTICES.md']) await cp(join(root, name), join(directory, name));
+    await mkdir(join(directory, 'licenses'), { recursive: true });
+    await cp(join(root, 'licenses/StashDock-legacy-MIT.txt'), join(directory, 'licenses/StashDock-legacy-MIT.txt'));
     for (const file of files) await cp(join(source, file), join(directory, file), { recursive: true });
     await writeFile(join(directory, 'manifest.json'), JSON.stringify(browserManifest(base, browser), null, 2) + '\n');
     if (browser === 'safari') {

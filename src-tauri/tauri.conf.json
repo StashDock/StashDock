@@ -82,7 +82,7 @@
     "active": true,
     "targets": ["nsis"],
     "icon": ["icons/icon.ico", "icons/icon.png"],
-    "resources": { "pdf-runtime/LICENSE": "licenses/pdfjs-dist-LICENSE", "../public/licenses/WebView2Com-MIT.txt": "licenses/WebView2Com-MIT.txt", "../public/licenses/WindowsRs-MIT.txt": "licenses/WindowsRs-MIT.txt", "../public/licenses/Brotli-MIT.txt": "licenses/Brotli-MIT.txt", "../public/licenses/Brotli-BSD-3-Clause.txt": "licenses/Brotli-BSD-3-Clause.txt", "../public/licenses/Flate2-MIT.txt": "licenses/Flate2-MIT.txt" },
+    "resources": { "../LICENSE": "LICENSE", "../LICENSING.md": "LICENSING.md", "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md", "../licenses/StashDock-legacy-MIT.txt": "licenses/StashDock-legacy-MIT.txt", "pdf-runtime/LICENSE": "licenses/pdfjs-dist-LICENSE", "../public/licenses/WebView2Com-MIT.txt": "licenses/WebView2Com-MIT.txt", "../public/licenses/WindowsRs-MIT.txt": "licenses/WindowsRs-MIT.txt", "../public/licenses/Brotli-MIT.txt": "licenses/Brotli-MIT.txt", "../public/licenses/Brotli-BSD-3-Clause.txt": "licenses/Brotli-BSD-3-Clause.txt", "../public/licenses/Flate2-MIT.txt": "licenses/Flate2-MIT.txt" },
     "windows": { "nsis": { "compression": "zlib" } },
     "shortDescription": "Local context dock for AI coding agents",
     "longDescription": "Save useful material once and move it into Codex or another AI coding agent as structured context.",

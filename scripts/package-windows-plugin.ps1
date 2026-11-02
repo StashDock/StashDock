@@ -31,7 +31,12 @@ foreach ($taskSql in @('schema.sql','search-index.sql','preview-version.sql')) {
 }
 [void][IO.Directory]::CreateDirectory((Join-Path $taskStage '.agents\plugins'))
 Copy-Item -LiteralPath (Join-Path $taskRoot '.agents\plugins\marketplace.json') -Destination (Join-Path $taskStage '.agents\plugins\marketplace.json')
-Copy-Item -LiteralPath (Join-Path $taskRoot 'LICENSE') -Destination (Join-Path $taskStage 'LICENSE')
+foreach ($taskLicense in @('LICENSE','LICENSING.md','THIRD_PARTY_NOTICES.md')) {
+  Copy-Item -LiteralPath (Join-Path $taskRoot $taskLicense) -Destination (Join-Path $taskStage $taskLicense)
+  Copy-Item -LiteralPath (Join-Path $taskRoot $taskLicense) -Destination (Join-Path $taskTarget $taskLicense)
+}
+[void][IO.Directory]::CreateDirectory((Join-Path $taskTarget 'licenses'))
+Copy-Item -LiteralPath (Join-Path $taskRoot 'licenses/StashDock-legacy-MIT.txt') -Destination (Join-Path $taskTarget 'licenses/StashDock-legacy-MIT.txt')
 Copy-Item -LiteralPath (Join-Path $taskRoot 'docs\windows-plugin-install.md') -Destination (Join-Path $taskStage 'README.md')
 $taskRecords = @(Get-ChildItem -LiteralPath $taskStage -File -Recurse -Force | ForEach-Object {
   if ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Release must not contain symlinks.' }

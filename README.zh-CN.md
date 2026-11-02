@@ -67,5 +67,5 @@
 
 收藏库保存在本机。存什么、给 AI 什么，由你决定。不同电脑之间不会自动同步。
 
-[MIT 许可证](LICENSE) · [第三方软件声明](THIRD_PARTY_NOTICES.md) ·
+[GNU AGPL v3 许可证](LICENSE) · [许可说明](LICENSING.md) · [第三方软件声明](THIRD_PARTY_NOTICES.md) ·
 [隐私政策](https://stashdock.app/privacy)

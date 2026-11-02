@@ -2,7 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 export const sourceRoots = new Set(['.agents','assets','docs','extension','licenses','plugins','public','scripts','shared','safari','src','src-tauri','tests']);
-export const rootFiles = new Set(['.gitattributes','.gitignore','README.md','README.zh-CN.md','LICENSE','THIRD_PARTY_NOTICES.md','components.json','index.html','package.json','package-lock.json','tsconfig.app.json','tsconfig.json','tsconfig.node.json','vite.config.ts']);
+export const rootFiles = new Set(['.gitattributes','.gitignore','README.md','README.zh-CN.md','LICENSE','LICENSING.md','THIRD_PARTY_NOTICES.md','components.json','index.html','package.json','package-lock.json','tsconfig.app.json','tsconfig.json','tsconfig.node.json','vite.config.ts']);
 export const publicDocuments = new Set(['docs/INSTALL_WINDOWS.md','docs/windows-plugin-install.md','docs/macos-plugin-install.md','docs/RELEASE_NOTES_v1.0.0.md','docs/RELEASE_NOTES_v1.0.1.md','docs/RELEASE_NOTES_v1.0.2.md']);
 export function privateSourcePath(path) {
   return /(^|\/)(node_modules|target|output|artifacts|profile|preview-runtime|connection-runtime|build-runtime|pdf-runtime|\.git|\.codex|\.playwright)(\/|$)/i.test(path)

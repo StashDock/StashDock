@@ -87,6 +87,9 @@ const notices = resolve(plugin, 'notices');
 // Notices describe exactly the dependencies in this build.
 await rm(notices, { recursive: true, force: true });
 await mkdir(notices, { recursive: true });
+for (const name of ['LICENSE', 'LICENSING.md', 'THIRD_PARTY_NOTICES.md']) await copyFile(resolve(root, name), resolve(plugin, name));
+await mkdir(resolve(plugin, 'licenses'), { recursive: true });
+await copyFile(resolve(root, 'licenses/StashDock-legacy-MIT.txt'), resolve(plugin, 'licenses/StashDock-legacy-MIT.txt'));
 await copyFile(resolve(root, 'build-runtime/node', platform, 'LICENSE'), resolve(notices, 'Node.js-LICENSE'));
 const inventory = [];
 inventory.push(`Node.js ${nodePin.version}: MIT and bundled third-party notices (Node.js-LICENSE)`);
