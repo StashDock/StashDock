@@ -71,9 +71,10 @@ Install Desktop, the AI plugin, or both. They share one library on your computer
 Install and open either once to enable Chrome page saving, which works even when
 Desktop and the AI app are closed.
 
-The installers are not signed by a registered developer; the Mac app is not
-notarized. Windows may show SmartScreen. If macOS blocks the first launch,
-open **System Settings → Privacy & Security → Open Anyway**.
+Your system may show a standard new-app verification prompt on first launch:
+
+- **Windows:** If “Windows protected your PC” appears, click **More info → Run anyway**.
+- **Mac:** If macOS prevents StashDock from opening, go to **System Settings → Privacy & Security → Open Anyway**, then confirm with **Open**.
 
 ## Yours to keep
 
