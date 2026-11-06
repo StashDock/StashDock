@@ -7,8 +7,8 @@
 <h1 align="center">Your context, ready for any AI.</h1>
 
 <p align="center">
-  An AI-native, local personal context library.<br>
-  Bring your links, files and prompts/rules into one visual library. Find what you need and use it in your next AI conversation.
+  A local, visual context library built for AI.<br>
+  Keep links, files and prompts/rules ready for your next conversation.
 </p>
 
 <p align="center">
@@ -30,47 +30,57 @@
 
 [![StashDock website](assets/readme/website.jpg)](https://stashdock.app)
 
-## The context you need, in one place
+## Keep useful context within reach
 
-Working with AI often means gathering context from browser bookmarks, local
-folders and past conversations. StashDock keeps it together, ready to find and reuse.
+A useful webpage may be in your bookmarks, a project file in a folder, and a
+prompt in an earlier chat. When you want to use them with AI, finding and
+bringing them into the conversation becomes a task of its own.
 
-Save pages as you browse with the Chrome extension, import browser bookmarks,
-add local files, or create notes for prompts/rules. Browse visual cards, search
-your library, organize references with tags and edit exactly what AI will receive.
+StashDock brings that context into one personal library on your computer.
+Visual cards make references easy to recognize, and quick search puts them
+within reach. Keep the material you want to reuse, organize it your way and
+bring it into whichever AI conversation needs it.
 
 ## ChatGPT plugin: your library beside the conversation
 
-Install the **StashDock ChatGPT plugin** to open your library in ChatGPT's
-sidebar. Browse and manage references beside the conversation, select what
-you need and choose **Add to chat**.
+The **StashDock ChatGPT plugin** opens your library in a sidebar beside the
+conversation. Browse and manage your references while you chat, then select
+what you need and choose **Add to chat**.
 
 ![Select references and add them to your AI conversation](assets/readme/ai-sidebar.gif)
 
 ## Desktop app: use your context in any AI app
 
 You can also download **StashDock Desktop**, a standalone app for Windows and
-Mac. Browse and manage your library in its own panel, then copy or drag
-references into any AI conversation.
+Mac. It gives your library its own panel, where you can browse, organize and
+select references to copy or drag into any AI app.
 
-Move the floating folder wherever it is convenient. Hover to search and drag
-a reference straight into your AI app, or click to open the full library.
+Keep the floating folder beside the app you are using. Move it anywhere,
+hover for quick search and drag a reference into your conversation. Click
+the folder to open the full library.
 
 ![Search, scroll through references, drag one into AI, then open the full library](assets/readme/desktop-workflow.gif)
 
 *Product previews use sample references. [Try them on the website](https://stashdock.app/#how).*
 
+## Collect and organize what you want to reuse
+
+- **Bring in existing material.** Import bookmarks from Chrome, Edge, Firefox or Safari; add links and local files; or save notes for prompts/rules.
+- **Save as you browse.** The Chrome extension captures the current page's link, readable content and cover. Review the title, content and tags before saving.
+- **Prepare context for your workflow.** Edit what AI will receive and use tags to keep related references together. Reuse a tag as a context set for a project or recurring task.
+
 ## Let AI work with your library
 
-Connect your AI through StashDock's MCP server and included skill to find,
-save and organize reusable context in conversation.
+With StashDock's MCP server and included skill, AI can work with your saved
+references and help maintain the library directly from the conversation.
 
-- **Find the right starting point.** “Find references in my library that could help with this project.”
-- **Keep what you learned.** “Save the writing rules we agreed on as a reusable reference.”
-- **Organize as you go.** “Suggest tags for these references and show me the plan before applying it.”
+- **Find relevant references.** “Look through my library and recommend references for this project.”
+- **Save useful context.** “Save the writing rules we agreed on so I can reuse them next time.”
+- **Organize the library.** “Suggest tags for these references and show me the plan before applying it.”
 
-Use tags to build context sets for a project or task, or reuse your preferred
-prompts/rules across AI apps. Explore what fits your workflow.
+Build a collection of design references, keep project documentation close,
+or reuse your preferred prompts/rules across AI apps. The same library can
+support different workflows as you explore what works for you.
 
 ## Get StashDock
 
@@ -93,10 +103,13 @@ Your system may show a standard new-app verification prompt on first launch:
 - **Windows:** If “Windows protected your PC” appears, click **More info → Run anyway**.
 - **Mac:** If macOS prevents StashDock from opening, go to **System Settings → Privacy & Security → Open Anyway**, then confirm with **Open**.
 
-## Yours to keep
+## Local and open source
 
-Your library is stored on your device. You choose what to save and what to give
-AI. Different computers do not sync automatically.
+Your library stays on your computer. You choose what to collect and which
+references to share with AI. Desktop and the ChatGPT plugin use the same local
+library; different computers do not sync automatically.
+
+StashDock is open source under GNU AGPL v3.
 
 [GNU AGPL v3 license](LICENSE) · [Licensing details](LICENSING.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) ·
 [Privacy](https://stashdock.app/privacy)
