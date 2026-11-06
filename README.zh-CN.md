@@ -12,8 +12,13 @@
 </p>
 
 <p align="center">
-  <a href="https://stashdock.app"><strong>官网</strong></a> ·
-  <a href="https://github.com/StashDock/StashDock/releases/latest"><strong>下载</strong></a> ·
+  <a href="https://stashdock.app"><img src="https://img.shields.io/badge/Website-stashdock.app-202020?style=flat-square" alt="官网：stashdock.app"></a>
+  <a href="https://github.com/StashDock/StashDock/releases/latest"><img src="https://img.shields.io/github/v/release/StashDock/StashDock?style=flat-square&amp;label=Download&amp;color=202020" alt="下载最新版本"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-202020?style=flat-square" alt="许可证：AGPL v3"></a>
+  <a href="https://chromewebstore.google.com/detail/bbglcpbhnobjhgccjinejnnlcefelkee"><img src="https://img.shields.io/badge/Chrome-Add_to_Chrome-008f55?style=flat-square&amp;logo=googlechrome&amp;logoColor=white" alt="添加至 Chrome"></a>
+</p>
+
+<p align="center">
   <a href="https://stashdock.app/guide">使用指南</a> ·
   <a href="https://github.com/StashDock/StashDock/issues">反馈</a>
 </p>

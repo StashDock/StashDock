@@ -12,8 +12,13 @@
 </p>
 
 <p align="center">
-  <a href="https://stashdock.app"><strong>Website</strong></a> ·
-  <a href="https://github.com/StashDock/StashDock/releases/latest"><strong>Download</strong></a> ·
+  <a href="https://stashdock.app"><img src="https://img.shields.io/badge/Website-stashdock.app-202020?style=flat-square" alt="Website: stashdock.app"></a>
+  <a href="https://github.com/StashDock/StashDock/releases/latest"><img src="https://img.shields.io/github/v/release/StashDock/StashDock?style=flat-square&amp;label=Download&amp;color=202020" alt="Download the latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-202020?style=flat-square" alt="License: AGPL v3"></a>
+  <a href="https://chromewebstore.google.com/detail/bbglcpbhnobjhgccjinejnnlcefelkee"><img src="https://img.shields.io/badge/Chrome-Add_to_Chrome-008f55?style=flat-square&amp;logo=googlechrome&amp;logoColor=white" alt="Add to Chrome"></a>
+</p>
+
+<p align="center">
   <a href="https://stashdock.app/guide">Guide</a> ·
   <a href="https://github.com/StashDock/StashDock/issues">Feedback</a>
 </p>
