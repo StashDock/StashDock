@@ -30,16 +30,16 @@
 
 [![StashDock website](assets/readme/website.jpg)](https://stashdock.app)
 
-## Overview
+## Keep useful context within reach
 
-Reference links, project files and reusable prompts/rules can be spread across
-browser bookmarks, local folders and previous conversations. Preparing context
-for a new AI conversation can require locating and assembling that material again.
+A useful webpage may be in your bookmarks, a project file in a folder, and a
+prompt in an earlier chat. When you want to use them with AI, finding and
+bringing them into the conversation becomes a task of its own.
 
-StashDock provides a local, visual library for collecting, organizing and
-reusing this context. Browse reference cards, search saved material and manage
-tags, then use selected references through the ChatGPT plugin or the standalone
-desktop app.
+StashDock brings that context into one personal library on your computer.
+Visual cards make references easy to recognize, and quick search puts them
+within reach. Keep the material you want to reuse, organize it your way and
+bring it into whichever AI conversation needs it.
 
 ## ChatGPT plugin
 
