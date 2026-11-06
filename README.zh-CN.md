@@ -8,7 +8,7 @@
 
 <p align="center">
   为 AI 而生的本地个人上下文库。<br>
-  把链接、文件、提示词和规则收在一起，找到需要的，带进下一次对话。
+  把链接、文件和 Prompt/规则收进一个可视化收藏库，找到需要的，带进下一次 AI 对话。
 </p>
 
 <p align="center">
@@ -19,27 +19,34 @@
 </p>
 
 <p align="center">
+  <a href="https://www.youtube.com/watch?v=0KamZB7aFMY"><img src="https://img.shields.io/badge/Video-YouTube-ff0000?style=flat-square&amp;logo=youtube&amp;logoColor=white" alt="在 YouTube 观看宣传片"></a>
+  <a href="https://www.bilibili.com/video/BV1ZL4c6NEmM/"><img src="https://img.shields.io/badge/Video-Bilibili-00a1d6?style=flat-square&amp;logo=bilibili&amp;logoColor=white" alt="在 Bilibili 观看宣传片"></a>
+</p>
+
+<p align="center">
   <a href="https://stashdock.app/guide">使用指南</a> ·
   <a href="https://github.com/StashDock/StashDock/issues">反馈</a>
 </p>
 
 [![StashDock 官网](assets/readme/website.jpg)](https://stashdock.app)
 
-## 留下好资料，少一点翻找
+## 需要的上下文，收在一起
 
-参考资料散落在浏览器标签页、本地文件夹和过去的对话里。StashDock 把它们收进一个可视化收藏库，方便搜索、整理和复用。
+使用 AI 时，需要的上下文常常散落在浏览器收藏夹、本地文件夹和过去的对话里。StashDock 把它们收在一起，方便随时查找和复用。
 
-用 Chrome 扩展保存网页，导入浏览器书签，或添加本地文件、笔记、提示词和规则。用标签归类，编辑交给 AI 的上下文，在不同对话中反复使用。
+用 Chrome 扩展随手保存网页，导入浏览器书签、添加本地文件，或把常用 Prompt/规则存成笔记。通过可视化卡片浏览、搜索和管理收藏，用标签归类，并编辑最终交给 AI 的上下文。
 
-## 在 AI 对话旁，打开你的库
+## ChatGPT 插件：收藏库就在对话旁
 
-直接在 AI 应用的侧边栏浏览收藏，选好引用，点击 **Add to chat（添加到对话）**。AI 插件目前支持 **ChatGPT**。
+安装 **StashDock ChatGPT 插件**，即可在 ChatGPT 侧边栏打开收藏库。边聊边浏览和管理参考，选好需要的内容，点击 **Add to chat（添加到对话）**。
 
 ![选择收藏并添加到 AI 对话](assets/readme/ai-sidebar.gif)
 
-## 在桌面上，交给任何 AI
+## 独立桌面应用：把上下文带进任意 AI
 
-将收藏复制或拖入任意 AI 对话。悬停文件夹即可快捷搜索，点击则展开完整收藏库。
+你也可以下载 **StashDock Desktop**，在 Windows 或 Mac 上使用独立的应用面板浏览和管理收藏，再将参考复制或拖入任意 AI 对话。
+
+悬浮文件夹可以移到顺手的位置，悬停即可快速搜索，找到参考直接拖进 AI 应用；点击文件夹则展开完整收藏库。
 
 ![搜索、滚动浏览卡片、拖入 AI，再打开完整收藏库](assets/readme/desktop-workflow.gif)
 
@@ -47,13 +54,13 @@
 
 ## 让 AI 帮你使用和管理上下文
 
-通过 MCP 和随附的 Skill，AI 既能从收藏库中寻找参考，也能把当前对话里值得复用的内容存下来。
+接入 StashDock 的 MCP 和随附 Skill，即可在对话中让 AI 查找、保存和整理可复用的上下文。
 
 - **找到合适的参考。**“看看我的收藏库，推荐几份适合当前项目的资料。”
 - **留下有用的成果。**“把我们刚确定的写作规则存为一条可复用的收藏。”
 - **边用边整理。**“帮这些收藏规划标签，先给我看方案，再应用。”
 
-用标签组合一组上下文，为项目建立参考资料库，或在不同 AI 之间复用常用提示词与规则。从你的日常工作出发，探索自己的用法。
+用标签为项目或任务定制上下文组合，在不同 AI 应用间复用常用 Prompt/规则。结合你的工作方式，探索更多用法。
 
 ## 下载 StashDock
 
@@ -64,7 +71,9 @@
 
 [添加至 Chrome](https://chromewebstore.google.com/detail/bbglcpbhnobjhgccjinejnnlcefelkee) · [安装指南](https://stashdock.app/guide#install-browser)
 
-桌面应用与 AI 插件可任选其一，也可以同时安装，在同一台电脑上共享收藏库。安装并打开其中一个，即可配置 Chrome 网页保存功能；此后即使两端都已退出，扩展仍能保存网页。
+ChatGPT 插件和独立桌面应用可任选其一，也可以同时安装。两者都能独立使用，同时安装时共享同一份本地收藏库。
+
+需要随手保存网页时，再安装 Chrome 扩展。安装并打开桌面应用或 AI 插件一次，完成配置后，即使两端都已退出，扩展仍能保存网页。
 
 首次打开时，系统可能显示新应用的常规验证提示：
 

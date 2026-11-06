@@ -8,7 +8,7 @@
 
 <p align="center">
   An AI-native, local personal context library.<br>
-  Bring your links, files, prompts and rules together. Find what matters, and put it to work in your next conversation.
+  Bring your links, files and prompts/rules into one visual library. Find what you need and use it in your next AI conversation.
 </p>
 
 <p align="center">
@@ -19,32 +19,42 @@
 </p>
 
 <p align="center">
+  <a href="https://www.youtube.com/watch?v=0KamZB7aFMY"><img src="https://img.shields.io/badge/Video-YouTube-ff0000?style=flat-square&amp;logo=youtube&amp;logoColor=white" alt="Watch the launch film on YouTube"></a>
+  <a href="https://www.bilibili.com/video/BV1ZL4c6NEmM/"><img src="https://img.shields.io/badge/Video-Bilibili-00a1d6?style=flat-square&amp;logo=bilibili&amp;logoColor=white" alt="Watch the launch film on Bilibili"></a>
+</p>
+
+<p align="center">
   <a href="https://stashdock.app/guide">Guide</a> ·
   <a href="https://github.com/StashDock/StashDock/issues">Feedback</a>
 </p>
 
 [![StashDock website](assets/readme/website.jpg)](https://stashdock.app)
 
-## Keep the context. Skip the search.
+## The context you need, in one place
 
-Good references are scattered across browser tabs, folders and past conversations.
-StashDock brings them into one visual library you can search, organize and reuse.
+Working with AI often means gathering context from browser bookmarks, local
+folders and past conversations. StashDock keeps it together, ready to find and reuse.
 
-Save pages with the Chrome extension, import bookmarks, or add local files,
-notes, prompts and rules. Group references with tags, edit the context you want
-AI to receive, and use the same collection across conversations.
+Save pages as you browse with the Chrome extension, import browser bookmarks,
+add local files, or create notes for prompts/rules. Browse visual cards, search
+your library, organize references with tags and edit exactly what AI will receive.
 
-## Beside your AI conversation
+## ChatGPT plugin: your library beside the conversation
 
-Open your library in the AI app's sidebar. Select references and choose
-**Add to chat**. The AI plugin is currently available for **ChatGPT**.
+Install the **StashDock ChatGPT plugin** to open your library in ChatGPT's
+sidebar. Browse and manage references beside the conversation, select what
+you need and choose **Add to chat**.
 
 ![Select references and add them to your AI conversation](assets/readme/ai-sidebar.gif)
 
-## On your desktop, into any AI
+## Desktop app: use your context in any AI app
 
-Copy or drag references into any AI conversation. Hover the floating folder to
-search, or click it to open your full library.
+You can also download **StashDock Desktop**, a standalone app for Windows and
+Mac. Browse and manage your library in its own panel, then copy or drag
+references into any AI conversation.
+
+Move the floating folder wherever it is convenient. Hover to search and drag
+a reference straight into your AI app, or click to open the full library.
 
 ![Search, scroll through references, drag one into AI, then open the full library](assets/readme/desktop-workflow.gif)
 
@@ -52,16 +62,15 @@ search, or click it to open your full library.
 
 ## Let AI work with your library
 
-Through MCP and its included skill, StashDock gives AI a useful role on both
-sides of the conversation: bringing saved context in, and saving useful context
-for next time.
+Connect your AI through StashDock's MCP server and included skill to find,
+save and organize reusable context in conversation.
 
 - **Find the right starting point.** “Find references in my library that could help with this project.”
 - **Keep what you learned.** “Save the writing rules we agreed on as a reusable reference.”
 - **Organize as you go.** “Suggest tags for these references and show me the plan before applying it.”
 
-Reuse a tag as a context set, build a project reference shelf, or carry your
-preferred prompts and rules between AI apps. Start with your own workflow.
+Use tags to build context sets for a project or task, or reuse your preferred
+prompts/rules across AI apps. Explore what fits your workflow.
 
 ## Get StashDock
 
@@ -72,9 +81,12 @@ preferred prompts and rules between AI apps. Start with your own workflow.
 
 [Add to Chrome](https://chromewebstore.google.com/detail/bbglcpbhnobjhgccjinejnnlcefelkee) · [Installation guide](https://stashdock.app/guide#install-browser)
 
-Install Desktop, the AI plugin, or both. They share one library on your computer.
-Install and open either once to enable Chrome page saving, which works even when
-Desktop and the AI app are closed.
+Choose the ChatGPT plugin, the standalone Desktop app, or both. Each works on
+its own; when installed together, they share the same local library.
+
+Add the Chrome extension to save pages as you browse. Install and open Desktop
+or the AI plugin once to set it up. Page saving then works even when Desktop
+and the AI app are closed.
 
 Your system may show a standard new-app verification prompt on first launch:
 
