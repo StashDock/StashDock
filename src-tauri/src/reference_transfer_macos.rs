@@ -1,20 +1,31 @@
-//! Public AppKit file-URL transport. Exported originals and Markdown stay files.
+//! Public AppKit transport for text and file groups.
 use crate::reference_drag::{DragHotspot, DragOutcome, DragStatus};
+use crate::reference_transfer::Transfer;
 use objc2::{
     define_class, msg_send, rc::Retained, runtime::ProtocolObject, AnyThread, DefinedClass,
     MainThreadMarker, MainThreadOnly,
 };
 use objc2_app_kit::{
     NSApplication, NSDragOperation, NSDraggingContext, NSDraggingFormation, NSDraggingItem,
-    NSDraggingSession, NSDraggingSource, NSEvent, NSImage, NSPasteboard, NSPasteboardWriting,
-    NSView,
+    NSDraggingSession, NSDraggingSource, NSEvent, NSImage, NSPasteboard, NSPasteboardItem,
+    NSPasteboardTypeString, NSPasteboardWriting, NSView,
 };
 use objc2_foundation::{
     NSArray, NSData, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL,
 };
-use std::{cell::RefCell, path::PathBuf, sync::mpsc::Sender, time::Instant};
+use std::{cell::RefCell, sync::mpsc::Sender, time::Instant};
 
-fn write_files(pasteboard: &NSPasteboard, files: &[PathBuf]) -> Result<(), String> {
+fn writers(
+    transfer: &Transfer,
+) -> Result<Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>>, String> {
+    if let Transfer::Text(text) = transfer {
+        let item = NSPasteboardItem::new();
+        if !item.setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString }) {
+            return Err("The reference text could not be prepared.".into());
+        }
+        return Ok(vec![ProtocolObject::from_retained(item)]);
+    }
+    let files = transfer.files();
     if files.is_empty() || files.len() > 10_001 {
         return Err("Invalid outgoing file group.".into());
     }
@@ -30,16 +41,20 @@ fn write_files(pasteboard: &NSPasteboard, files: &[PathBuf]) -> Result<(), Strin
             NSURL::fileURLWithPath(&NSString::from_str(path)),
         ));
     }
-    let objects = NSArray::from_retained_slice(&urls);
+    Ok(urls)
+}
+
+fn write_transfer(pasteboard: &NSPasteboard, transfer: &Transfer) -> Result<(), String> {
+    let objects = NSArray::from_retained_slice(&writers(transfer)?);
     pasteboard.clearContents();
     if !pasteboard.writeObjects(&objects) {
-        return Err("The files could not be copied. Try again.".into());
+        return Err("The references could not be copied. Try again.".into());
     }
     Ok(())
 }
 
-pub fn copy_to_clipboard(files: &[PathBuf]) -> Result<(), String> {
-    write_files(&NSPasteboard::generalPasteboard(), files)
+pub fn copy_to_clipboard(transfer: &Transfer) -> Result<(), String> {
+    write_transfer(&NSPasteboard::generalPasteboard(), transfer)
 }
 
 struct DragState {
@@ -90,7 +105,7 @@ thread_local! {
 
 pub fn start_drag(
     source: &tauri::WebviewWindow,
-    files: &[PathBuf],
+    transfer: &Transfer,
     png: &[u8],
     hotspot: Option<DragHotspot>,
     completion: Sender<Result<DragOutcome, String>>,
@@ -136,18 +151,12 @@ pub fn start_drag(
             point.y - size.height + y
         },
     );
-    let mut items = Vec::with_capacity(files.len());
-    for (index, file) in files.iter().enumerate() {
-        let path = file
-            .to_str()
-            .ok_or("The outgoing filename is not supported.")?;
-        let url = NSURL::fileURLWithPath(&NSString::from_str(path));
-        let item = NSDraggingItem::initWithPasteboardWriter(
-            NSDraggingItem::alloc(),
-            ProtocolObject::from_ref(&*url),
-        );
+    let writers = writers(transfer)?;
+    let mut items = Vec::with_capacity(writers.len());
+    for (index, writer) in writers.iter().enumerate() {
+        let item = NSDraggingItem::initWithPasteboardWriter(NSDraggingItem::alloc(), writer);
         // SAFETY: NSImage is a documented contents type. One preview represents
-        // the complete selection while every item still transfers its file URL.
+        // the complete selection while each item keeps its pasteboard data.
         unsafe {
             item.setDraggingFrame_contents(
                 NSRect::new(origin, size),
@@ -177,6 +186,28 @@ pub fn start_drag(
 mod tests {
     use super::*;
     use objc2_app_kit::NSPasteboardTypeFileURL;
+    use std::path::PathBuf;
+
+    #[test]
+    fn note_transfer_is_text_with_no_file_url() {
+        let board = NSPasteboard::pasteboardWithUniqueName();
+        let body = "Note body 中文";
+        write_transfer(&board, &Transfer::Text(body.into())).unwrap();
+        let items = board.pasteboardItems().unwrap();
+        assert_eq!(items.len(), 1);
+        let item = items.iter().next().unwrap();
+        assert_eq!(
+            item
+                .stringForType(unsafe { NSPasteboardTypeString })
+                .unwrap()
+                .to_string(),
+            body
+        );
+        assert!(item
+            .stringForType(unsafe { NSPasteboardTypeFileURL })
+            .is_none());
+        board.clearContents();
+    }
 
     #[test]
     fn named_pasteboard_receives_separate_real_files_and_rejects_missing_files() {
@@ -189,7 +220,7 @@ mod tests {
             ("Original 中文.pdf", b"%PDF-1.7\0\xff original bytes"),
             ("Office 📚.docx", b"PK\x03\x04\0\xfe opaque package bytes"),
             ("Image.png", b"\x89PNG\r\n\x1a\n\0\xff opaque raster bytes"),
-            ("Note.txt", "Note body 中文".as_bytes()),
+            ("Original.txt", "Text file 中文".as_bytes()),
             ("Context.md", b"# Supplemental context"),
         ];
         let files: Vec<PathBuf> = payloads.iter().map(|(name, _)| root.join(name)).collect();
@@ -197,7 +228,14 @@ mod tests {
             std::fs::write(path, bytes).unwrap();
         }
         let board = NSPasteboard::pasteboardWithUniqueName();
-        write_files(&board, &files).unwrap();
+        write_transfer(
+            &board,
+            &Transfer::Files {
+                context_file: Some(files.last().unwrap().clone()),
+                files: files.clone(),
+            },
+        )
+        .unwrap();
         let items = board.pasteboardItems().unwrap();
         assert_eq!(items.len(), files.len());
         for (index, item) in items.iter().enumerate() {
@@ -211,7 +249,15 @@ mod tests {
             assert_eq!(path, files[index]);
             assert_eq!(std::fs::read(path).unwrap(), payloads[index].1);
         }
-        assert!(write_files(&board, &[root.join("missing.txt")]).is_err());
+        let missing = root.join("missing.txt");
+        assert!(write_transfer(
+            &board,
+            &Transfer::Files {
+                context_file: Some(missing.clone()),
+                files: vec![missing]
+            }
+        )
+        .is_err());
         assert_eq!(board.pasteboardItems().unwrap().len(), files.len());
         board.clearContents();
         std::fs::remove_dir_all(root).unwrap();

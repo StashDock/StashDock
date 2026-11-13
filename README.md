@@ -49,6 +49,14 @@ for inserting selected references directly into the current conversation.
 
 ![Select references and add them to your AI conversation](assets/readme/ai-sidebar.gif)
 
+## DeepSeek Harness plugin
+
+The **StashDock plugin for DeepSeek Harness** opens the same library in its
+right sidebar. Links and notes are added as context quotes; files use native
+attachments, with supplemental context included when you provide it.
+
+See the [plugin setup and requirements](plugins/stashdock-dsh/README.md).
+
 ## Desktop app
 
 You can also download **StashDock Desktop**, a standalone app for Windows and
@@ -69,8 +77,8 @@ the full library.
 | --- | --- |
 | Reference import | Import bookmarks from Chrome, Edge, Firefox and Safari; add links, local files and notes for prompts/rules. Browser bookmark import does not require an extension. |
 | Browser capture | Save the current page's link, available readable content and cover through the Chrome extension. Review and edit the capture before saving. |
-| Visual organization | Browse reference cards in grid or list view, search the library, and manage favorites and tags. |
-| Context editing | Edit the final context associated with a reference before using it with AI. |
+| Visual organization | Browse grid or list view, search the library, manage favorites and tags, and sort by date or usage. |
+| Context editing | Edit link and note context, or add optional supplemental instructions to files. |
 | Context sets | Group related references with tags for reuse across projects, tasks and conversations. |
 
 ## AI integration: MCP and Skills
@@ -109,7 +117,7 @@ Your system may show a standard new-app verification prompt on first launch:
 
 ## Local storage
 
-References are stored on the local device. Desktop and the ChatGPT plugin
+References are stored on the local device. Desktop and the AI plugins
 operate independently and use the same library when installed on the same
 computer. Users select which references to provide to AI. Libraries on
 different computers do not sync automatically.

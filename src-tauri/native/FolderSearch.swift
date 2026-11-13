@@ -340,8 +340,8 @@ private typealias EventSink = @convention(c) (UnsafePointer<CChar>) -> Void
         }
     }
     func offerDrag(_ data:Data) -> Bool {
-        guard let json = try? JSONSerialization.jsonObject(with:data) as? [String:Any], open, json["session"] as? String == session, let token = json["token"] as? String, let paths = json["paths"] as? [String] else { return false }
-        return flow.prepared(token,paths:paths)
+        guard let json = try? JSONSerialization.jsonObject(with:data) as? [String:Any], open, json["session"] as? String == session, let token = json["token"] as? String else { return false }
+        return flow.prepared(token,paths:json["paths"] as? [String] ?? [],text:json["text"] as? String)
     }
     func windowDidResignKey(_ notification:Notification) { if open && !takingFocus && !dragging { close() } }
     @objc private func screenChanged() { if attached { close(immediate:true); send("place") } }

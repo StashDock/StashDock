@@ -81,9 +81,15 @@ fn prepare(
         let (kind, mime) = file_kind(Path::new(&name));
         let created = now()?;
         let mut origin = serde_json::json!({ "platform": "Local file", "importMethod": "local_file", "fileName": name, "importedAt": created });
+        let staged = if is_text_mime(mime) {
+            String::from_utf8_lossy(&bytes).chars().take(50_000).collect::<String>()
+        } else { String::new() };
+        if file.content != staged {
+            origin["contentEdited"] = serde_json::json!(true);
+        }
         if cover.is_some() { origin["previewKind"] = serde_json::json!("cover"); origin["previewSource"] = serde_json::json!("custom"); }
         Ok(StashItem { id, title: file.title.trim().to_string(), kind: kind.into(), source: "Local file".into(), url: None,
-            excerpt: text_excerpt(&file.content), tags: tags.clone(), created_at: created.clone(), favorite: false,
+            excerpt: text_excerpt(&file.content), tags: tags.clone(), created_at: created.clone(), use_count: 0, favorite: false,
             preview: cover.or_else(|| if kind == "image" { crate::web_images::raster(&bytes, false).ok() } else { None }), preview_status: None,
             asset_path: Some(path.to_string_lossy().into_owned()), original_path: None, mime_type: Some(mime.into()), size_bytes: Some(bytes.len() as u64),
             content: Some(file.content), context_override: None,

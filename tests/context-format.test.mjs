@@ -35,7 +35,7 @@ test('AI-generated provenance and source URLs survive editor/MCP context without
 
 for (const fixture of JSON.parse(readFileSync(new URL('./fixtures/context-contract.json', import.meta.url)))) {
   test(`shared native/JS context contract: ${fixture.name}`, () => {
-    assert.equal(buildContext(fixture.items, { originalFilesDelivered: fixture.originalFilesDelivered }), fixture.expected);
+    assert.equal(buildContext(fixture.items), fixture.expected);
   });
 }
 
@@ -53,5 +53,5 @@ test('file delivery instructions survive empty overrides and never leak managed 
   assert.match(result, /get_stashdock_file/);
   assert.match(result, /^- report\.xlsx · ID a$/m);
   assert.doesNotMatch(result, /C:[/\\]|private/);
-  assert.equal(buildContext([file], { originalFilesDelivered: true }), '');
+  assert.equal(buildContext([file]), '');
 });

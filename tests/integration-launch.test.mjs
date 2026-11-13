@@ -9,6 +9,9 @@ test('application opening prefers registered clients and otherwise official site
   assert.equal((await integrationDestination('codex', { platform:'win32', readRegistry })).target, 'codex://');
   assert.equal((await integrationDestination('claude', { platform:'win32', readRegistry })).target, 'https://claude.ai/');
   assert.equal((await integrationDestination('codex', { platform:'linux' })).target, 'https://chatgpt.com/');
+  assert.equal((await integrationDestination('dsh', { platform:'win32', readRegistry: async key => key === 'HKCR\\dsh\\shell\\open\\command' ? 'Registered DSH' : null })).target, 'dsh://open');
+  assert.equal((await integrationDestination('dsh', { platform:'win32', readRegistry: async () => null })).target, 'https://deepseek.com/harness');
+  assert.deepEqual(await integrationDestination('dsh', { platform:'darwin', macApplication: async id => id === 'dsh' ? '/Applications/DeepSeek Harness.app' : null }), { target:'/Applications/DeepSeek Harness.app', fallback:null });
   const chrome = await integrationDestination('chrome', { platform:'win32', readRegistry:async key=>key.startsWith('HKCU')?'(Default) REG_SZ C:\\Chrome\\chrome.exe':null, file:()=>true });
   assert.equal(chrome.target, 'C:\\Chrome\\chrome.exe');
   assert.equal((await integrationDestination('desktop', { platform:'win32', desktopPath:'D:\\StashDock\\stashdock.exe', file:()=>true })).target,'D:\\StashDock\\stashdock.exe');

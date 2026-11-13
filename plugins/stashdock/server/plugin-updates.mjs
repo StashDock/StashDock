@@ -1,14 +1,14 @@
-// Settings > About > Check for updates in the ChatGPT plugin. Plugin packages
-// are published as GitHub release assets named
-// stashdock-plugin-<version>-<platform>-<arch>.zip (win32-x64, darwin-arm64);
-// the newest package for this computer is compared with this plugin. Installing
-// stays with the host: the App only opens the release page.
-const assetPattern = target => new RegExp(`^stashdock-plugin-(\\d+)\\.(\\d+)\\.(\\d+)-${target.replace(/[^\w-]/g, '')}\\.zip$`);
+// Only match the package built for this plugin host and machine.
+const releaseAssets = {
+  chatgpt: { prefix: 'stashdock-plugin', extension: 'zip' },
+  dsh: { prefix: 'stashdock-dsh', extension: 'tgz' },
+};
 const parse = value => { const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(value)); return match ? match.slice(1).map(Number) : null; };
 const newer = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i]; return false; };
 
-export async function checkPluginUpdates({ repository, current, target = `${process.platform}-${process.arch}`, fetchImpl = fetch }) {
-  const ASSET = assetPattern(target);
+export async function checkPluginUpdates({ repository, current, pluginKind = 'chatgpt', target = `${process.platform}-${process.arch}`, fetchImpl = fetch }) {
+  const { prefix, extension } = releaseAssets[pluginKind];
+  const assetPattern = new RegExp(`^${prefix}-(\\d+)\\.(\\d+)\\.(\\d+)-${target.replace(/[^\w-]/g, '')}\\.${extension}$`);
   if (typeof repository !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(repository)) return { status: 'unconfigured', version: null, url: null };
   const installed = parse(current);
   if (!installed) throw Error('The installed version is invalid.');
@@ -31,7 +31,7 @@ export async function checkPluginUpdates({ repository, current, target = `${proc
     if (!release || release.draft || release.prerelease || !Array.isArray(release.assets)) continue;
     const page = typeof release.html_url === 'string' && release.html_url.startsWith(`https://github.com/${repository}/releases/`) ? release.html_url : null;
     for (const asset of release.assets) {
-      const match = ASSET.exec(asset?.name || '');
+      const match = assetPattern.exec(asset?.name || '');
       if (!match || !page) continue;
       const version = match.slice(1).map(Number);
       if (!best || newer(version, best.version)) best = { version, url: page };

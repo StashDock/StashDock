@@ -1,4 +1,4 @@
-//! User-initiated copying of the same Markdown file used by native drag.
+//! User-initiated copying of the same payload used by native drag.
 //! No automatic paste, host IPC, focus changes, or library mutations.
 use tauri::{AppHandle, Manager};
 
@@ -26,6 +26,7 @@ pub(crate) async fn copy_ids(app: AppHandle, item_ids: Vec<String>) -> Result<()
     }
     #[cfg(any(windows, target_os = "macos"))]
     {
+        let usage_ids = item_ids.clone();
         let database = app
             .state::<crate::library::LibraryState>()
             .database_path()
@@ -43,13 +44,9 @@ pub(crate) async fn copy_ids(app: AppHandle, item_ids: Vec<String>) -> Result<()
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         app.run_on_main_thread(move || {
             #[cfg(windows)]
-            let _ = tx.send(crate::reference_drag_windows::copy_to_clipboard(
-                &file.files,
-            ));
+            let _ = tx.send(crate::reference_drag_windows::copy_to_clipboard(&file));
             #[cfg(target_os = "macos")]
-            let _ = tx.send(crate::reference_transfer_macos::copy_to_clipboard(
-                &file.files,
-            ));
+            let _ = tx.send(crate::reference_transfer_macos::copy_to_clipboard(&file));
         })
         .map_err(|_| "Could not start clipboard copying.".to_string())?;
         let result = tauri::async_runtime::spawn_blocking(move || rx.recv())
@@ -57,8 +54,14 @@ pub(crate) async fn copy_ids(app: AppHandle, item_ids: Vec<String>) -> Result<()
             .map_err(|_| "Clipboard copying was interrupted.".to_string())?
             .map_err(|_| "Clipboard copying was interrupted.".to_string())?;
         if result.is_ok() {
+            let usage_app = app.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                crate::reference_drag::prune_exports(&keep.context_file)
+                crate::library::usage::record_transfer(&usage_app, &usage_ids)
+            });
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Some(path) = keep.export_anchor() {
+                    crate::reference_drag::prune_exports(path);
+                }
             });
         }
         // Retain the generated file even if flushing failed after clipboard ownership

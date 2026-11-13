@@ -6,7 +6,7 @@ export function matchesCollection(item: StashItem, filter: CollectionFilter, now
   switch (filter) {
     case "recent": return Date.parse(item.createdAt) >= now - 7 * 24 * 60 * 60 * 1000;
     case "web": return item.kind === "web" || item.kind === "repo";
-    case "files": return Boolean(item.assetPath || item.hasFile || ["file", "pdf", "image"].includes(item.kind));
+    case "files": return item.kind !== "note" && Boolean(item.assetPath || item.hasFile || ["file", "pdf", "image"].includes(item.kind));
     case "favorites": return Boolean(item.favorite);
     default: return true;
   }

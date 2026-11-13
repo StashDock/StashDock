@@ -1,4 +1,4 @@
-//! Immutable outgoing copies, shared by native clipboard and drag. No parsing.
+//! One outgoing payload for the native clipboard and drag.
 use crate::library::{self, StashItem};
 use std::{
     collections::{HashMap, HashSet},
@@ -8,12 +8,33 @@ use std::{
 };
 
 const MAX_FILES: usize = 100;
-const MAX_BYTES: u64 = 100_000_000;
+const MAX_BYTES: u64 = 1024 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
-pub(crate) struct Transfer {
-    pub files: Vec<PathBuf>,
-    pub context_file: PathBuf,
+pub(crate) enum Transfer {
+    Text(String),
+    Files {
+        files: Vec<PathBuf>,
+        context_file: Option<PathBuf>,
+    },
+}
+
+impl Transfer {
+    pub(crate) fn files(&self) -> &[PathBuf] {
+        match self {
+            Self::Text(_) => &[],
+            Self::Files { files, .. } => files,
+        }
+    }
+    pub(crate) fn context_file(&self) -> Option<&Path> {
+        match self {
+            Self::Text(_) => None,
+            Self::Files { context_file, .. } => context_file.as_deref(),
+        }
+    }
+    pub(crate) fn export_anchor(&self) -> Option<&Path> {
+        self.files().first().map(PathBuf::as_path)
+    }
 }
 
 fn original_name(item: &StashItem, path: &Path) -> String {
@@ -121,6 +142,9 @@ pub(crate) fn export(database: &Path, ids: &[String], root: &Path) -> Result<Tra
     let mut reference_paths = Vec::new();
     let mut seen = HashSet::new();
     for (index, item) in items.iter().enumerate() {
+        if item.kind == "note" {
+            continue;
+        }
         if item.asset_path.is_none() && !["file", "pdf", "image"].contains(&item.kind.as_str()) {
             continue;
         }
@@ -139,6 +163,9 @@ pub(crate) fn export(database: &Path, ids: &[String], root: &Path) -> Result<Tra
     if originals.len() > MAX_FILES {
         return Err("Select up to 100 original files at a time.".into());
     }
+    if originals.is_empty() && items.iter().any(|item| item.kind == "note") {
+        return Ok(Transfer::Text(library::reference_transfer_context(&items)?));
+    }
     fs::create_dir_all(root).map_err(|e| e.to_string())?;
     let folder = root.join(format!("StashDock transfer - {}", uuid::Uuid::new_v4()));
     fs::create_dir(&folder).map_err(|e| e.to_string())?;
@@ -152,11 +179,6 @@ pub(crate) fn export(database: &Path, ids: &[String], root: &Path) -> Result<Tra
                     .unwrap_or_else(|| format!("## {}", item.title))
             })
             .unwrap_or_default();
-        let (context_file, mut context_output) = create_output(
-            &folder,
-            &crate::reference_drag::export_filename(&naming_context, ids.len()),
-            &mut used,
-        )?;
         let mut files = Vec::new();
         let mut total = 0;
         let mut actual_names = HashMap::new();
@@ -165,7 +187,7 @@ pub(crate) fn export(database: &Path, ids: &[String], root: &Path) -> Result<Tra
                 .map_err(|_| "An original file could not be read. Import it again.")?;
             let length = source.metadata().map_err(|e| e.to_string())?.len();
             if length > MAX_BYTES - total {
-                return Err("Select original files under 100 MB in total.".into());
+                return Err("Select original files up to 1 GB in total.".into());
             }
             let (destination, mut output) =
                 create_output(&folder, &original_name(&items[index], &path), &mut used)?;
@@ -186,7 +208,6 @@ pub(crate) fn export(database: &Path, ids: &[String], root: &Path) -> Result<Tra
         // Names belong to this outgoing snapshot, never the saved library.
         // Match every section (including shared originals) to the actual flat,
         // collision-safe attachment name before formatting its context.
-        let mut manifest = Vec::new();
         for (index, path) in reference_paths {
             let name = &actual_names[&path];
             let item = &mut items[index];
@@ -195,25 +216,17 @@ pub(crate) fn export(database: &Path, ids: &[String], root: &Path) -> Result<Tra
                 *origin = serde_json::json!({});
             }
             origin["fileName"] = serde_json::json!(name);
-            manifest.push(format!(
-                "- {}: {name}",
-                item.title.replace(['\r', '\n'], " ")
-            ));
         }
-        let context = library::reference_transfer_context(&items)?;
-        context_output
-            .write_all(context.as_bytes())
-            .map_err(|e| e.to_string())?;
-        if !manifest.is_empty() {
-            write!(
-                context_output,
-                "\n\n---\n\n## Attached original files\nRead these files for their contents; file descriptions are supplemental.\n{}\n",
-                manifest.join("\n")
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        files.push(context_file.clone());
-        Ok(Transfer {
+        let context = library::native_reference_context(&items)?;
+        let context_file = if !context.trim().is_empty() || files.is_empty() {
+            let (path, mut output) = create_output(
+                &folder, &crate::reference_drag::export_filename(&naming_context, ids.len()), &mut used,
+            )?;
+            output.write_all(context.as_bytes()).map_err(|e| e.to_string())?;
+            files.push(path.clone());
+            Some(path)
+        } else { None };
+        Ok(Transfer::Files {
             files,
             context_file,
         })
@@ -252,7 +265,7 @@ fn discard_folder(root: &Path, folder: &Path) {
 }
 
 pub(crate) fn discard(transfer: &Transfer) {
-    if let Some(folder) = transfer.context_file.parent() {
+    if let Some(folder) = transfer.export_anchor().and_then(Path::parent) {
         if let Some(root) = folder.parent() {
             discard_folder(root, folder);
         }
@@ -308,7 +321,7 @@ mod tests {
             override_text: Option<&str>,
         ) {
             let db = rusqlite::Connection::open(&self.database).unwrap();
-            db.execute("INSERT INTO stash_items(id,title,kind,source,excerpt,tags_json,created_at,updated_at,asset_path,content,origin_json,context_override) VALUES(?1,?2,?3,'Fixture','','[\"Research\"]','2026-10-15','2026-10-15',?4,'User supplemental content',?5,?6)", rusqlite::params![id,format!("Title {id}"),kind,path.map(|p|p.to_string_lossy().into_owned()),serde_json::json!({"fileName":name}).to_string(),override_text]).unwrap();
+            db.execute("INSERT INTO stash_items(id,title,kind,source,excerpt,tags_json,created_at,updated_at,asset_path,content,origin_json,context_override) VALUES(?1,?2,?3,'Fixture','','[\"Research\"]','2026-10-15','2026-10-15',?4,'User supplemental content',?5,?6)", rusqlite::params![id,format!("Title {id}"),kind,path.map(|p|p.to_string_lossy().into_owned()),serde_json::json!({"fileName":name,"contentEdited":true}).to_string(),override_text]).unwrap();
         }
         fn output(&self) -> PathBuf {
             self.root.join("exports")
@@ -327,6 +340,23 @@ mod tests {
         }
     }
     #[test]
+    fn unannotated_originals_have_no_markdown_and_still_clean_up_owned_exports() {
+        let fixture = Fixture::new();
+        let path = fixture.root.join("assets/report.csv");
+        fs::write(&path, b"a,b\n1,2\n").unwrap();
+        fixture.add("bare", "file", Some(&path), "report.csv", None);
+        let db = rusqlite::Connection::open(&fixture.database).unwrap();
+        db.execute("UPDATE stash_items SET origin_json=json_remove(origin_json,'$.contentEdited'),content='Automatic extraction' WHERE id='bare'", []).unwrap();
+        let transfer = export(&fixture.database, &["bare".into()], &fixture.output()).unwrap();
+        assert_eq!(transfer.files().len(), 1);
+        assert!(transfer.context_file().is_none());
+        assert_eq!(fs::read(&transfer.files()[0]).unwrap(), b"a,b\n1,2\n");
+        let owned = transfer.files()[0].clone();
+        discard(&transfer);
+        assert!(!owned.exists());
+        assert!(path.exists());
+    }
+    #[test]
     fn copies_original_bytes_and_context_in_one_flat_group_without_mutating_the_library() {
         let fixture = Fixture::new();
         let original = fixture.root.join("assets/original.pdf");
@@ -334,24 +364,24 @@ mod tests {
         fs::write(&original, bytes).unwrap();
         fixture.add("a", "pdf", Some(&original), "资料.pdf", None);
         let transfer = export(&fixture.database, &["a".into()], &fixture.output()).unwrap();
-        assert_eq!(transfer.files.len(), 2);
-        assert_eq!(transfer.files[0].file_name().unwrap(), "资料.pdf");
-        assert_ne!(transfer.files[0], original);
-        assert_eq!(fs::read(&transfer.files[0]).unwrap(), bytes);
-        let context = fs::read_to_string(&transfer.context_file).unwrap();
+        assert_eq!(transfer.files().len(), 2);
+        assert_eq!(transfer.files()[0].file_name().unwrap(), "资料.pdf");
+        assert_ne!(transfer.files()[0], original);
+        assert_eq!(fs::read(&transfer.files()[0]).unwrap(), bytes);
+        let context = fs::read_to_string(transfer.context_file().unwrap()).unwrap();
         assert!(
             context.contains("User supplemental content")
-                && context.contains("Research")
-                && context.contains("Title a: 资料.pdf")
+                && !context.contains("Research")
+                && context.contains("## 资料.pdf")
         );
         assert!(transfer
-            .files
+            .files()
             .iter()
-            .all(|p| p.parent() == transfer.context_file.parent()));
-        fs::write(&transfer.files[0], "Receiver edit").unwrap();
+            .all(|p| p.parent() == transfer.context_file().unwrap().parent()));
+        fs::write(&transfer.files()[0], "Receiver edit").unwrap();
         assert_eq!(fs::read(&original).unwrap(), bytes);
         discard(&transfer);
-        assert!(!transfer.context_file.exists());
+        assert!(!transfer.context_file().unwrap().exists());
         assert!(original.exists());
     }
     #[cfg(target_os = "macos")]
@@ -372,16 +402,16 @@ mod tests {
             &fixture.output(),
         )
         .expect("macOS treats the two spellings as one filename; preserve both originals");
-        assert_eq!(transfer.files.len(), 3);
-        assert_eq!(fs::read(&transfer.files[0]).unwrap(), b"first original");
-        assert_eq!(fs::read(&transfer.files[1]).unwrap(), b"second original");
-        assert!(transfer.files[1]
+        assert_eq!(transfer.files().len(), 3);
+        assert_eq!(fs::read(&transfer.files()[0]).unwrap(), b"first original");
+        assert_eq!(fs::read(&transfer.files()[1]).unwrap(), b"second original");
+        assert!(transfer.files()[1]
             .file_name()
             .unwrap()
             .to_string_lossy()
             .contains(" (2).pdf"));
-        let context = fs::read_to_string(&transfer.context_file).unwrap();
-        for path in &transfer.files[..2] {
+        let context = fs::read_to_string(transfer.context_file().unwrap()).unwrap();
+        for path in &transfer.files()[..2] {
             assert!(context.contains(path.file_name().unwrap().to_str().unwrap()));
         }
         let db = rusqlite::Connection::open(&fixture.database).unwrap();
@@ -408,11 +438,11 @@ mod tests {
             Some("## Caf\u{e9}\n\nEdited context"),
         );
         let transfer = export(&fixture.database, &["a".into()], &fixture.output()).unwrap();
-        assert_eq!(fs::read(&transfer.files[0]).unwrap(), b"original bytes");
-        assert!(fs::read_to_string(&transfer.context_file)
+        assert_eq!(fs::read(&transfer.files()[0]).unwrap(), b"original bytes");
+        assert!(fs::read_to_string(transfer.context_file().unwrap())
             .unwrap()
             .contains("Edited context"));
-        assert!(transfer.files[0]
+        assert!(transfer.context_file().unwrap()
             .file_name()
             .unwrap()
             .to_string_lossy()
@@ -441,37 +471,54 @@ mod tests {
             &fixture.output(),
         )
         .unwrap();
-        assert_eq!(transfer.files.len(), 4);
-        assert_eq!(fs::read(&transfer.files[0]).unwrap(), b"second");
-        assert_eq!(fs::read(&transfer.files[2]).unwrap(), b"first");
+        assert_eq!(transfer.files().len(), 3);
+        assert_eq!(fs::read(&transfer.files()[0]).unwrap(), b"second");
+        assert_eq!(fs::read(&transfer.files()[1]).unwrap(), b"first");
         assert_ne!(
-            transfer.files[0]
+            transfer.files()[0]
                 .file_name()
                 .unwrap()
                 .to_string_lossy()
                 .to_lowercase(),
-            transfer.files[2]
+            transfer.files()[1]
                 .file_name()
                 .unwrap()
                 .to_string_lossy()
                 .to_lowercase()
         );
-        let context = fs::read_to_string(transfer.context_file).unwrap();
+        let context = fs::read_to_string(transfer.context_file().unwrap()).unwrap();
         assert!(context.contains("Exact edited context") && context.contains("Title n"));
+    }
+    #[test]
+    fn note_and_link_use_text_without_creating_an_export_folder() {
+        let fixture = Fixture::new();
+        fixture.add("n", "note", None, "", None);
+        fixture.add("w", "web", None, "", None);
+        let output = fixture.output();
+        let transfer = export(&fixture.database, &["n".into(), "w".into()], &output).unwrap();
+        let Transfer::Text(text) = transfer else {
+            panic!("Expected text transfer")
+        };
+        assert!(text.contains("### Note text\nUser supplemental content"));
+        assert!(text.contains("## Title w"));
+        assert!(!output.exists());
     }
     #[test]
     fn non_file_references_keep_the_exact_existing_markdown() {
         let fixture = Fixture::new();
         fixture.add("n", "web", None, "", Some("Exact override\n  whitespace"));
         let transfer = export(&fixture.database, &["n".into()], &fixture.output()).unwrap();
-        assert_eq!(transfer.files, [transfer.context_file.clone()]);
         assert_eq!(
-            fs::read_to_string(transfer.context_file).unwrap(),
+            transfer.files(),
+            [transfer.context_file().unwrap().to_path_buf()]
+        );
+        assert_eq!(
+            fs::read_to_string(transfer.context_file().unwrap()).unwrap(),
             "Exact override\n  whitespace"
         );
     }
     #[test]
-    fn sections_use_actual_collision_safe_names_and_note_text_stays_in_the_original() {
+    fn sections_use_collision_safe_names_and_keep_note_text_in_context() {
         let fixture = Fixture::new();
         for (id, filename) in [("a", "one.pdf"), ("b", "two.pdf")] {
             let path = fixture.root.join("assets").join(filename);
@@ -491,15 +538,12 @@ mod tests {
             &fixture.output(),
         )
         .unwrap();
-        let text = fs::read_to_string(&transfer.context_file).unwrap();
-        assert!(text.contains("File: Report.pdf") && text.contains("File: Report (2).pdf"));
+        let text = fs::read_to_string(transfer.context_file().unwrap()).unwrap();
+        assert!(text.contains("## Report.pdf") && text.contains("## Report (2).pdf"));
         assert!(!text.contains(&fixture.root.to_string_lossy().to_string()));
-        // Two file annotations remain; the identical Note projection does not.
-        assert_eq!(text.matches("User supplemental content").count(), 2);
-        assert!(transfer.files.iter().any(|file| file
-            .extension()
-            .is_some_and(|extension| extension == "txt")
-            && fs::read_to_string(file).unwrap() == "User supplemental content"));
+        assert_eq!(text.matches("User supplemental content").count(), 3);
+        assert!(text.contains("### Note text"));
+        assert_eq!(transfer.files().len(), 3);
         let origin: String = db
             .query_row(
                 "SELECT origin_json FROM stash_items WHERE id='b'",
@@ -543,7 +587,7 @@ mod tests {
         fixture.add("a", "pdf", Some(&original), "large.pdf", None);
         assert!(export(&fixture.database, &["a".into()], &fixture.output())
             .unwrap_err()
-            .contains("100 MB"));
+            .contains("1 GB"));
         assert_eq!(fs::read_dir(fixture.output()).unwrap().count(), 0);
         assert_eq!(original.metadata().unwrap().len(), MAX_BYTES + 1);
     }

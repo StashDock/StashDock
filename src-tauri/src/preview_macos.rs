@@ -286,12 +286,32 @@ mod tests {
                             let request = header(&mut stream);
                             let path = String::from_utf8_lossy(&request).split_whitespace().nth(1).unwrap_or("").to_owned();
                             seen.lock().unwrap().push(path.clone());
-                            let (status, extra, content_type, body) = if path == "/style.css" {
+                            let (status, extra, content_type, body) = if path == "/settling" {
+                                ("200 OK", String::new(), "text/html", "<!doctype html><style>body{margin:0;background:rgb(170,170,170);animation:paint 1.4s steps(1,end) forwards}h1{opacity:0;animation:show 1.4s steps(1,end) forwards}@keyframes paint{to{background:rgb(33,113,191)}}@keyframes show{to{opacity:1}}</style><h1>Late visible article</h1>".to_string())
+                            } else if path == "/overlay" {
+                                ("200 OK", String::new(), "text/html", "<!doctype html><style>body{margin:0;background:rgb(170,170,170)}#cover{position:fixed;inset:0;z-index:100;background:rgb(170,170,170)}</style><nav>Small menu</nav><main><h1>Complete article underneath the loading layer</h1><p>This meaningful article must not be captured while its full viewport loading layer still obscures all of the actual reference content.</p></main><div id='cover'><svg width='320' height='200'><rect width='320' height='200' fill='gray'/></svg></div><script>setTimeout(()=>{document.getElementById('cover').remove();document.body.style.background='rgb(33,113,191)'},8200)</script>".to_string())
+                            } else if path == "/worker.js" {
+                                ("200 OK", String::new(), "application/javascript", format!(r#"fetch('http://127.0.0.1:{port}/worker').catch(()=>{{}});fetch('http://127.0.0.1.nip.io/worker').catch(()=>{{}});try{{new WebSocket('ws://127.0.0.1:{port}/worker-socket')}}catch{{}};postMessage('ran');"#))
+                            } else if path == "/frame" {
+                                ("200 OK", String::new(), "text/html", format!(r#"<script>fetch('http://127.0.0.1:{port}/frame-fetch').catch(()=>{{}});parent.postMessage({{frameRtc:typeof RTCPeerConnection}},'*');</script>"#))
+                            } else if path == "/blank" {
+                                ("200 OK", String::new(), "text/html", "<!doctype html><body style='background:rgb(170,170,170)'></body>".to_string())
+                            } else if path == "/style.css" {
                                 ("200 OK", String::new(), "text/css", "body{margin:0;background:rgb(33,113,191);color:white}h1{padding:40px}".to_string())
                             } else if path == "/redirect" {
                                 ("302 Found", format!("Location: http://127.0.0.1:{port}/secret\r\n"), "text/plain", String::new())
                             } else {
-                                ("200 OK", String::new(), "text/html", format!(r#"<!doctype html><html><head><link rel="stylesheet" href="http://example.org/style.css"></head><body><h1>Native isolated screenshot</h1><img src="http://127.0.0.1:{port}/private.png"><iframe src="http://localhost:{port}/private"></iframe><img src="http://127.0.0.1.nip.io/alias.png"><script>document.body.style.background='red';fetch('http://127.0.0.1:{port}/script')</script></body></html>"#))
+                                ("200 OK", String::new(), "text/html", format!(r#"<!doctype html><html><head><link rel="stylesheet" href="http://example.org/style.css"></head><body><h1>Native isolated screenshot</h1><img src="http://127.0.0.1:{port}/private.png"><iframe src="http://localhost:{port}/private"></iframe><img src="http://127.0.0.1.nip.io/alias.png"><script>
+                                document.body.setAttribute('aria-busy','true');document.body.dataset.rtc=typeof RTCPeerConnection;document.body.dataset.sw=typeof navigator.serviceWorker;
+                                fetch('http://127.0.0.1:{port}/script').catch(()=>{{}});fetch('http://127.0.0.1.nip.io/fetch').catch(()=>{{}});
+                                try{{new WebSocket('ws://127.0.0.1:{port}/socket')}}catch{{}};
+                                try{{const x=new XMLHttpRequest();x.open('POST','http://127.0.0.1:{port}/xhr');x.send('capture')}}catch{{}};
+                                const worker=new Worker('http://example.org/worker.js');worker.onmessage=()=>document.body.dataset.worker='ran';
+                                try{{const dataWorker=new Worker('data:application/javascript,'+encodeURIComponent("fetch('http://127.0.0.1:{port}/data-worker').catch(()=>{{}});postMessage('ran')"));dataWorker.onmessage=()=>document.body.dataset.dataWorker='ran';dataWorker.onerror=()=>document.body.dataset.dataWorker='blocked'}}catch{{document.body.dataset.dataWorker='blocked'}};
+                                addEventListener('message',e=>{{if(e.data?.frameRtc)document.body.dataset.frameRtc=e.data.frameRtc}});
+                                requestAnimationFrame(()=>requestAnimationFrame(()=>document.body.dataset.animation='ran'));
+                                setTimeout(()=>{{document.body.style.background='red';document.body.removeAttribute('aria-busy')}},1600);
+                                </script><iframe src="http://example.org/frame"></iframe></body></html>"#))
                             };
                             let response = format!("HTTP/1.1 {status}\r\n{extra}Content-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
                             let _ = stream.write_all(response.as_bytes());
@@ -398,6 +418,40 @@ mod tests {
         verify_native_guard(Fixture::with_socks(true));
     }
 
+    #[test]
+    #[ignore = "runs native WebKit with a delayed first meaningful paint"]
+    fn native_webkit_waits_for_visible_stable_content() {
+        use base64::Engine;
+        let fixture = Fixture::new();
+        let result = run(json!({"url":"http://example.org/settling","proxyPort":fixture.proxy.port()}), &AtomicBool::new(false), Instant::now()+Duration::from_secs(10)).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD.decode(result["preview"].as_str().unwrap().split_once(',').unwrap().1).unwrap();
+        let image = image::load_from_memory(&bytes).unwrap().to_rgb8();
+        let pixel = image.get_pixel(1100,700).0;
+        assert!(pixel[0]<45 && (100..125).contains(&pixel[1]) && (180..205).contains(&pixel[2]), "captured unfinished gray frame: {pixel:?}");
+    }
+
+    #[test]
+    #[ignore = "runs native WebKit with a permanently empty gray page"]
+    fn native_webkit_never_accepts_a_blank_gray_page() {
+        let fixture = Fixture::new();
+        let started = Instant::now();
+        assert!(run(json!({"url":"http://example.org/blank","proxyPort":fixture.proxy.port()}), &AtomicBool::new(false), started+Duration::from_secs(12)).is_err(), "a blank gray frame must not be a successful cover");
+        assert!(started.elapsed() < Duration::from_secs(11), "a stagnant gray page must stop at the quality budget, before the owner's hard timeout");
+    }
+
+    #[test]
+    #[ignore = "runs native WebKit with a script-owned full-viewport loader"]
+    fn native_webkit_waits_until_the_loading_layer_reveals_the_article() {
+        use base64::Engine;
+        let fixture = Fixture::new();
+        let result = run(json!({"url":"http://example.org/overlay","proxyPort":fixture.proxy.port()}), &AtomicBool::new(false), Instant::now()+Duration::from_secs(14)).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD.decode(result["preview"].as_str().unwrap().split_once(',').unwrap().1).unwrap();
+        let image = image::load_from_memory(&bytes).unwrap().to_rgb8();
+        let pixel = image.get_pixel(1100,700).0;
+        assert!(pixel[0]<45 && (100..125).contains(&pixel[1]) && (180..205).contains(&pixel[2]), "captured the loader instead of the article: {pixel:?}");
+        assert!(!result["html"].as_str().unwrap().contains("id=\"cover\""), "capture must follow the website's own loader dismissal");
+    }
+
     fn verify_native_guard(fixture: Fixture) {
         let result = run(
             json!({"url":"http://example.org/page","proxyPort":fixture.proxy.port()}),
@@ -417,6 +471,10 @@ mod tests {
             &url::Url::parse("http://example.org/page").unwrap(),
         );
         assert!(page.content.contains("Native isolated screenshot"));
+        for attribute in ["data-rtc=\"undefined\"", "data-sw=\"undefined\"", "data-worker=\"ran\"", "data-frame-rtc=\"undefined\"", "data-animation=\"ran\""] {
+            assert!(html.contains(attribute), "missing dynamic isolation evidence: {attribute}");
+        }
+        assert!(html.contains("data-data-worker=\"ran\"") || html.contains("data-data-worker=\"blocked\""), "inline workers must either run under the same network guard or be rejected");
         assert!(
             !page.content.contains("fetch("),
             "script source is not reference content"
@@ -435,8 +493,8 @@ mod tests {
         let image = image::load_from_memory(&bytes).unwrap().to_rgb8();
         let pixel = image.get_pixel(1100, 700).0;
         assert!(
-            pixel[0] < 45 && (100..125).contains(&pixel[1]) && (180..205).contains(&pixel[2]),
-            "CSS must load; page JavaScript must stay disabled: {pixel:?}"
+            pixel[0] > 230 && pixel[1] < 20 && pixel[2] < 20,
+            "page scripts must paint after the loading state: {pixel:?}"
         );
         assert!(fixture
             .paths

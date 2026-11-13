@@ -13,7 +13,7 @@ if (!Number.isSafeInteger(count) || count < 30 || count > 10_000) throw Error('U
 const { createLocalLibrary } = await import(pathToFileURL(join(source, 'plugins/stashdock/server/local-library.mjs')));
 const { previewQueue } = await import(pathToFileURL(join(source, 'plugins/stashdock/server/preview-worker.mjs')));
 const { searchReferenceIds } = await import(pathToFileURL(join(source, 'plugins/stashdock/server/search-index.mjs')));
-const { synchronizeNoteFiles } = await import(pathToFileURL(join(source, 'plugins/stashdock/server/note-files.mjs')));
+const { migrateNoteFiles } = await import(pathToFileURL(join(source, 'plugins/stashdock/server/note-files.mjs')));
 const root = mkdtempSync(join(tmpdir(), 'stashdock-stage-perf-'));
 let library, db, q;
 try {
@@ -49,7 +49,7 @@ try {
       assert.ok(index.every(item => item.preview == null && item.content == null));
       indexes.push(performance.now() - indexStart);
       const noteStart = performance.now();
-      synchronizeNoteFiles(db, join(root, 'assets'));
+      migrateNoteFiles(db, join(root, 'assets'));
       noteChecks.push(performance.now() - noteStart);
       const ftsStart = performance.now();
       assert.equal(searchReferenceIds(db, 'Context content').length, count);

@@ -141,3 +141,18 @@ pub async fn open_reference_file(app: AppHandle, id: String) -> Result<(), Strin
     })
     .await
 }
+
+#[tauri::command]
+pub async fn get_library_sort(app: AppHandle) -> Result<String, String> {
+    run(app, |s| {
+        super::usage::get_sort(&s.connection.lock().unwrap())
+    })
+    .await
+}
+#[tauri::command]
+pub async fn set_library_sort(app: AppHandle, sort: String) -> Result<(), String> {
+    run(app, move |s| {
+        super::usage::set_sort(&s.connection.lock().unwrap(), &sort)
+    })
+    .await
+}

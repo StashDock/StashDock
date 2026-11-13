@@ -13,6 +13,7 @@ export function createSidebarClient(api, windowId, toDraft, {live=()=>true, inte
   });
   function connect() {
     if(stopped||closing)return;
+    clearTimeout(reconnectTimer);
     const id=++connection,previous=port;
     port=undefined;previous?.disconnect();
     const next=api.runtime.connect({name:`stashdock-sidebar:${windowId}:${clientId}`});port=next;
@@ -31,7 +32,7 @@ export function createSidebarClient(api, windowId, toDraft, {live=()=>true, inte
         if(id!==connection||stopped||closing)return;
         port=undefined;reject(Error('The sidebar connection changed.'));
         clearTimeout(reconnectTimer);
-        reconnectTimer=setTimeout(()=>{if(live())try{connect();}catch{/* Health reconciliation retries later. */}},200);
+        reconnectTimer=setTimeout(()=>{if(!port&&live())try{connect();}catch{/* Health reconciliation retries later. */}},200);
       });
     });
     void ready.catch(()=>{});
@@ -39,8 +40,10 @@ export function createSidebarClient(api, windowId, toDraft, {live=()=>true, inte
   async function request(type,extra={},retry=true) {
     for(let attempt=0;attempt<(retry?3:1);attempt++){
       if(stopped||closing&&type!=='close-panel')throw Error('The sidebar was closed.');
+      let attemptedConnection;
       try{
         if(!port)connect();
+        attemptedConnection=connection;
         await bounded(ready,'Sidebar connection');
         const result=await bounded(api.runtime.sendMessage({type,windowId,clientId,token,...extra}),'Page request',type==='save-current-page'?30000:type==='provider-status'||type==='read-tags'?16000:timeout);
         if(!result||typeof result!=='object')throw Error('The sidebar connection returned no response.');
@@ -48,7 +51,9 @@ export function createSidebarClient(api, windowId, toDraft, {live=()=>true, inte
         return result;
       }catch(error){
         if(!retry||attempt===2||!/connection|timed out|receiving end|port|sidebar was closed/i.test(error.message))throw error;
-        try{connect();}catch{/* Retry remains bounded. */}
+        // Concurrent reads can fail on the same old worker. Reuse a replacement
+        // another read already opened instead of disconnecting that healthy port.
+        if(!port||attemptedConnection===connection)try{connect();}catch{/* Retry remains bounded. */}
         await sleep(100*(attempt+1));
       }
     }

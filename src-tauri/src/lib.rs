@@ -146,6 +146,8 @@ pub fn run() {
             library::commands::save_items,
             library::commands::replace_saved_link,
             library::commands::list_items,
+            library::commands::get_library_sort,
+            library::commands::set_library_sort,
             library::commands::get_items,
             library::commands::set_item_favorite,
             library::commands::edit_item,
@@ -249,7 +251,7 @@ pub fn run() {
                     };
                     if let Some(helper) = helper {
                         tauri::async_runtime::spawn_blocking(move || {
-                            if let Err(error) = library::native_host::register("desktop", &helper, false) {
+                            if let Err(error) = library::native_host::register("desktop", &helper, library::native_host::Registration::Replace) {
                                 eprintln!("StashDock browser save component: {error}");
                             }
                         });

@@ -38,7 +38,8 @@ function Popup({ services }: { services: PopupServices }) {
       const next = await services.providerStatus();
       if (mounted.current) { setConnected(next.connected); setConnectionError(next.connected ? '' : next.error || ''); }
     } catch {
-      if (mounted.current) { setConnected(false); setConnectionError(''); }
+      // A broken sidebar channel says nothing about the installed save component.
+      if (mounted.current) { setConnected(null); setConnectionError(''); }
     } finally {
       checkingConnection.current = false;
       if (mounted.current) setChecking(false);
@@ -140,7 +141,7 @@ function Popup({ services }: { services: PopupServices }) {
     <header className={styles.header}><h1>Save current page</h1><Button variant="ghost" size="sm" type="button" aria-label="Refresh page" data-tooltip="Refresh page" loading={loading} onClick={() => void capture(true, false)} disabled={saving}><RefreshCw size={16} strokeWidth={1.75} aria-hidden="true" /></Button></header>
     <form className={styles.form} onSubmit={save}>
       <div className={styles.body}>
-        {connected === false && <Alert tone="warning" title="Connect StashDock"><span>{connectionError || 'Install StashDock Desktop or the ChatGPT plugin to save pages.'}</span><br /><Button type="button" variant="secondary" size="sm" loading={checking} onClick={() => void checkConnection()}>Check again</Button></Alert>}
+        {connected === false && <Alert tone="warning" title="Connect StashDock"><span>{connectionError || 'Open StashDock Desktop or a StashDock AI plugin, then check again.'}</span><br /><Button type="button" variant="secondary" size="sm" loading={checking} onClick={() => void checkConnection()}>Check again</Button></Alert>}
         {loading && !page ? <div className={styles.loading} role="status" aria-label="Reading current page"><Skeleton lines={2} /><Skeleton lines={2} /><Skeleton lines={5} /><Skeleton lines={2} /></div> : page && <>
           <Input label="Link" value={page.url || ''} readOnly />
           <Input label="Title" value={title} onChange={event => {dirty.current.title=true;setSaved(false);setTitle(event.target.value);}} maxLength={500} disabled={saving} autoFocus />

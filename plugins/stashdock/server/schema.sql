@@ -13,3 +13,8 @@ CREATE TABLE IF NOT EXISTS stash_items (
 CREATE INDEX IF NOT EXISTS idx_stash_items_created_at ON stash_items(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_stash_items_kind ON stash_items(kind);
 CREATE INDEX IF NOT EXISTS idx_stash_items_url ON stash_items(url);
+CREATE TABLE IF NOT EXISTS reference_usage (
+  id TEXT PRIMARY KEY REFERENCES stash_items(id) ON DELETE CASCADE,
+  use_count INTEGER NOT NULL DEFAULT 0 CHECK(use_count >= 0)
+);
+CREATE TABLE IF NOT EXISTS reference_usage_receipts (operation_id TEXT PRIMARY KEY);

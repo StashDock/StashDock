@@ -1,0 +1,35 @@
+[
+  {
+    "name": "automatic extraction produces no native sidecar",
+    "items": [{"id":"file","title":"Report","kind":"file","source":"Local file","excerpt":"text/csv · 30 B","content":"Automatically extracted rows","assetPath":"D:/private/report.csv","tags":["Files"],"createdAt":"2026-11-11","origin":{"fileName":"report.csv"}}],
+    "expected": ""
+  },
+  {
+    "name": "annotations entered at import are grouped by original name",
+    "items": [{"id":"file","title":"My report","kind":"file","source":"Local file","excerpt":"Metadata","content":"Compare Q2 with Q3.\nKeep the units in USD.","assetPath":"D:/private/report.xlsx","tags":["Files"],"createdAt":"2026-11-11","origin":{"fileName":"report.xlsx","contentEdited":true}}],
+    "expected": "## report.xlsx\n\nCompare Q2 with Q3.\nKeep the units in USD."
+  },
+  {
+    "name": "legacy explicit final edit remains intact",
+    "items": [{"id":"file","title":"Report","kind":"file","source":"Local file","excerpt":"Old excerpt","assetPath":"D:/private/report.pdf","contextOverride":"# My instructions\n  Keep this formatting.\n","tags":[],"createdAt":"2026-11-11","origin":{"fileName":"report.pdf"}}],
+    "expected": "## report.pdf\n\n# My instructions\n  Keep this formatting.\n"
+  },
+  {
+    "name": "legacy binary byte-import annotations without a marker are preserved",
+    "items": [{"id":"file","title":"Budget","kind":"file","source":"Local file","excerpt":"Focus on the forecast tab.","content":"Focus on the forecast tab.","assetPath":"D:/private/budget.xlsx","mimeType":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","tags":[],"createdAt":"2026-11-11","origin":{"fileName":"budget.xlsx","importMethod":"local_file"}}],
+    "expected": "## budget.xlsx\n\nFocus on the forecast tab."
+  },
+  {
+    "name": "clearing an annotation suppresses older import annotations",
+    "items": [{"id":"file","title":"Report","kind":"file","source":"Local file","excerpt":"Metadata","content":"Earlier annotation","assetPath":"D:/private/report.pdf","contextOverride":"","tags":[],"createdAt":"2026-11-11","origin":{"fileName":"report.pdf","contentEdited":true}}],
+    "expected": ""
+  },
+  {
+    "name": "mixed bare originals leave selected note context untouched",
+    "items": [
+      {"id":"file","title":"Report","kind":"file","source":"Local file","excerpt":"Auto summary","content":"Extracted body","assetPath":"D:/private/report.csv","tags":[],"createdAt":"2026-11-11","origin":{"fileName":"report.csv"}},
+      {"id":"note","title":"Rules","kind":"note","source":"Personal note","excerpt":"","contextOverride":"Apply these writing rules.","tags":[],"createdAt":"2026-11-11"}
+    ],
+    "expected": "Apply these writing rules."
+  }
+]

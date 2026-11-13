@@ -32,6 +32,7 @@ export type StashItem = {
   tags: string[];
   createdAt: string;
   favorite?: boolean;
+  useCount?: number;
   preview?: string;
   previewStatus?: "queued" | "working" | "failed" | "unavailable";
   contentStatus?: "queued" | "working" | "failed" | "done";

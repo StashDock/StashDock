@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "StashDock Companion",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Save page text and screenshots from your browser to StashDock for AI context.",
   "minimum_chrome_version": "141",
   "incognito": "not_allowed",

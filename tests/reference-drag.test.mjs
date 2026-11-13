@@ -12,7 +12,7 @@ const apiUrl=moduleUrl('export const isTauri=()=>globalThis.__referenceTransport
 const contextUrl=moduleUrl(compile(await read('src/lib/context.ts')).replaceAll("'./context-format.mjs'", JSON.stringify(new URL('../src/lib/context-format.mjs', import.meta.url).href)).replace("'@tauri-apps/api/core'",JSON.stringify(apiUrl)));
 const nativeUrl=moduleUrl(compile(await read('src/lib/reference-drag-native.ts')).replace('"@tauri-apps/api/core"',JSON.stringify(apiUrl)));
 const nativeDrag=await import(nativeUrl);
-const source=compile(await read('src/lib/reference-drag.ts')).replace('"./context"',JSON.stringify(contextUrl)).replace('"./reference-drag-native"',JSON.stringify(nativeUrl)).replace('"@tauri-apps/api/core"',JSON.stringify(apiUrl));
+const source=compile(await read('src/lib/reference-drag.ts')).replace('"./context-format.mjs"',JSON.stringify(new URL('../src/lib/context-format.mjs', import.meta.url).href)).replace('"./context"',JSON.stringify(contextUrl)).replace('"./reference-drag-native"',JSON.stringify(nativeUrl)).replace('"@tauri-apps/api/core"',JSON.stringify(apiUrl));
 const drag=await import(moduleUrl(source));
 const item={id:'1',title:'Title <script> & "quoted"',kind:'web',source:'fixture.test',url:'https://fixture.test',excerpt:'资料 🌟',tags:[]};
 
@@ -22,9 +22,9 @@ test('browser drag retains escaped public text formats; Copy for AI remains sepa
   assert.match(payload['text/html'],/&lt;script&gt; &amp; &quot;quoted&quot;/);
   assert.doesNotMatch(payload['text/html'],/<script>|<img/);
   assert.equal(payload['text/uri-list'],item.url);
-  const batch=drag.referenceDragPayload([item,{...item,title:'Local note',url:undefined}]);
+  const batch=drag.referenceDragPayload([item,{...item,kind:'note',title:'Local note',url:undefined}]);
   assert.match(batch['text/plain'],/Local note/);
-  assert.equal(batch['text/uri-list'],item.url);
+  assert.equal(batch['text/uri-list'],'');
 });
 
 test('download metadata preserves Unicode context and flat Unicode-safe filenames',()=>{

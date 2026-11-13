@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { openFilePath, resolveManagedFile } from './open-file.mjs';
 import { synchronizeOriginal } from './original-files.mjs';
 import { createChosenFiles } from './chosen-files.mjs';
-import { synchronizeNoteFiles } from './note-files.mjs';
+import { migrateNoteFiles } from './note-files.mjs';
 import { customCapturePlatform } from '../../../src/lib/captureSites.ts';
 import { canonicalReferenceUrl } from '../../../src/lib/reference-url.mjs';
 import { LOCATION_KEY, resolveLibraryDirectory } from './library-location.mjs';
@@ -20,6 +20,7 @@ import { browserCaptureStore } from './browser-capture.mjs';
 import { createShelfReader } from './shelf-read.mjs';
 import { tagRevision } from './library.mjs';
 import { prepareSearchIndex, searchReferenceIds } from './search-index.mjs';
+import { readLibrarySort, saveLibrarySort, annotateUsage, orderLibraryItems, recordReferenceUse } from './library-usage.mjs';
 
 /** Desktop's pinned tag list (library.rs PINNED_TAGS_KEY). */
 const PINNED_TAGS_KEY = 'desktop_pinned_tags_v1';
@@ -46,11 +47,12 @@ const coverRaster = value => {
 };
 function fromRow(row) {
   const origin = row.origin_json ? JSON.parse(row.origin_json) : undefined;
+  const file = row.kind !== 'note';
   return { id: row.id, title: row.title, kind: row.kind, source: row.source, url: row.url || undefined,
     excerpt: row.excerpt, tags: JSON.parse(row.tags_json), createdAt: row.created_at, favorite: Boolean(row.favorite),
-    preview: row.preview || undefined, assetPath: row.asset_path || undefined, originalPath: row.original_path || undefined,
-    mimeType: row.mime_type || undefined, hasFile: Boolean(row.has_file || row.asset_path), sizeBytes: row.size_bytes ?? undefined, content: row.content ?? undefined, contextOverride: row.context_override ?? undefined,
-    origin };
+    preview: row.preview || undefined, assetPath: (file && row.asset_path) || undefined, originalPath: (file && row.original_path) || undefined,
+    mimeType: (file && row.mime_type) || undefined, hasFile: file && Boolean(row.has_file || row.asset_path), sizeBytes: file ? row.size_bytes ?? undefined : undefined, content: row.content ?? undefined, contextOverride: row.context_override ?? undefined,
+    useCount: row.use_count || 0, origin };
 }
 
 export function createLocalLibrary({ dataDir, browserEnabled } = {}) {
@@ -97,15 +99,15 @@ function openLocalLibrary({ dataDir, browserEnabled }) {
     db.prepare('INSERT OR IGNORE INTO app_meta(key,value) VALUES (?,?)').run('library_initialized_v1', '1');
   });
   const get = id => {
-    synchronizeNoteFiles(db, assets, id);
-    const row = db.prepare('SELECT * FROM stash_items WHERE id=?').get(id);
+    migrateNoteFiles(db, assets, id);
+    const row = db.prepare('SELECT stash_items.*,COALESCE(u.use_count,0) AS use_count FROM stash_items LEFT JOIN reference_usage u ON u.id=stash_items.id WHERE stash_items.id=?').get(id);
     if (!row) throw new Error('This reference no longer exists. Refresh the shelf.');
     return fromRow(row);
   };
   // Changed originals refresh their backup before AI reads them. A reference
   // without an original, or with neither file reachable, keeps its saved text.
   const refreshOriginal = id => {
-    if (!db.prepare("SELECT 1 FROM stash_items WHERE id=? AND COALESCE(original_path,'')!='' AND COALESCE(asset_path,'')!=''").get(id)) return;
+    if (!db.prepare("SELECT 1 FROM stash_items WHERE id=? AND kind<>'note' AND COALESCE(original_path,'')!='' AND COALESCE(asset_path,'')!=''").get(id)) return;
     try { synchronizeOriginal(db, assets, id); } catch { /* Report through the file tools instead. */ }
   };
   const listCapturePlatforms = () => JSON.parse(db.prepare("SELECT value FROM app_meta WHERE key='capture_platforms_v1'").get()?.value || '[]');
@@ -391,10 +393,11 @@ function openLocalLibrary({ dataDir, browserEnabled }) {
   };
   const remove = id => ({ deleted: removeMany([id]).deleted > 0 });
   const chosenFiles = createChosenFiles();
-  const importChosenFiles = (drafts, selectedTags) => {
+  const importChosenFiles = async (drafts, selectedTags) => {
     const explicitTags = selectedTags === undefined ? undefined : tags(selectedTags);
-    const rows = chosenFiles.prepare(drafts, assets, raster);
+    const rows = await chosenFiles.prepare(drafts, assets, raster);
     try {
+      if (db.prepare('SELECT value FROM app_meta WHERE key=?').get(LOCATION_KEY)) throw Error('The library location changed. Choose the files again.');
       return transaction(() => rows.map(row => insert({ title: row.title, kind: row.kind, source: 'Local file', excerpt: row.excerpt,
         tags: explicitTags ?? [row.kind === 'image' ? 'Image' : row.kind === 'pdf' ? 'PDF' : 'File'], content: row.content,
         preview: row.preview ?? row.image, origin: { ...row.origin, ...(row.preview ? { previewKind: 'cover', previewSource: 'custom' } : {}) } },
@@ -423,26 +426,32 @@ function openLocalLibrary({ dataDir, browserEnabled }) {
       const assetPath = join(assets, `${randomUUID()}-${name}`);
       writeFileSync(assetPath, bytes, { flag: 'wx' }); written.push(assetPath);
       const kind = mime.startsWith('image/') ? 'image' : mime === 'application/pdf' ? 'pdf' : 'file';
-      const content = editedContent ?? (mime.startsWith('text/') || /\.(md|txt|csv|json|html|css|js|ts|py)$/i.test(name) ? bytes.toString('utf8').slice(0, 2_000_000) : undefined);
+      const extracted = mime.startsWith('text/') || /\.(md|txt|csv|json|html|css|js|ts|py)$/i.test(name) ? bytes.toString('utf8').slice(0, 2_000_000) : undefined;
+      const staged = Array.from(extracted || '').slice(0, 50_000).join('');
+      const content = editedContent ?? extracted;
       return insert({ title: title?.trim() || name, kind, source: 'Local file', excerpt: content ? content.replace(/\s+/g,' ').slice(0,180) : `${mime} · ${Math.ceil(bytes.length / 1024)} KB`,
         tags: explicitTags ?? [kind === 'image' ? 'Image' : kind === 'pdf' ? 'PDF' : 'File'], content,
         preview: preview ?? (kind === 'image' ? raster(`data:${mime};base64,${bytes.toString('base64')}`) : undefined),
-        origin: { platform: 'Local file', importMethod: 'local_file', fileName: name, ...(preview ? { previewKind: 'cover', previewSource: 'custom' } : {}) } }, { assetPath, mimeType: mime, sizeBytes: bytes.length }).item;
+        origin: { platform: 'Local file', importMethod: 'local_file', fileName: name,
+          ...(editedContent !== undefined && editedContent !== staged ? { contentEdited: true } : {}),
+          ...(preview ? { previewKind: 'cover', previewSource: 'custom' } : {}) } }, { assetPath, mimeType: mime, sizeBytes: bytes.length }).item;
     })); } catch (error) { for (const path of written) unlinkSync(path); throw error; }
   };
-  synchronizeNoteFiles(db, assets);
-  return { ...createShelfReader(db, { fromRow, synchronize: () => synchronizeNoteFiles(db, assets), annotate: annotatePreviews }),
-    dataDir: root, read: async (visual = false) => { synchronizeNoteFiles(db, assets); return annotatePreviews(db.prepare(visual ? "SELECT id,title,kind,source,url,excerpt,tags_json,created_at,favorite,preview,origin_json,mime_type,CASE WHEN asset_path IS NOT NULL AND asset_path!='' THEN 1 ELSE 0 END AS has_file,NULL AS content,NULL AS asset_path,NULL AS original_path,NULL AS size_bytes FROM stash_items ORDER BY created_at DESC,rowid" : 'SELECT * FROM stash_items ORDER BY created_at DESC,rowid').all().map(fromRow)); },
+  migrateNoteFiles(db, assets);
+  return { ...createShelfReader(db, { fromRow, synchronize: () => migrateNoteFiles(db, assets), annotate: annotatePreviews }),
+    getSort: () => readLibrarySort(db), setSort: sort => saveLibrarySort(db, sort), recordUse: (ids, operationId) => recordReferenceUse(db, ids, operationId),
+    dataDir: root, read: async (visual = false) => { migrateNoteFiles(db, assets); return orderLibraryItems(db, annotatePreviews(db.prepare(visual ? "SELECT id,title,kind,source,url,excerpt,tags_json,created_at,favorite,preview,origin_json,mime_type,CASE WHEN asset_path IS NOT NULL AND asset_path!='' THEN 1 ELSE 0 END AS has_file,NULL AS content,NULL AS asset_path,NULL AS original_path,NULL AS size_bytes FROM stash_items ORDER BY created_at DESC,rowid" : 'SELECT * FROM stash_items ORDER BY created_at DESC,rowid').all().map(fromRow))); },
     readItems: ids => [...new Set(ids)].map(id => { refreshOriginal(id); return get(id); }),
-    searchIds: query => { synchronizeNoteFiles(db, assets); return searchReferenceIds(db, query); },
+    searchIds: query => { migrateNoteFiles(db, assets); return searchReferenceIds(db, query); },
     resolveFile: id => {
       const item = get(id);
+      if (item.kind === 'note') throw Error('This note is saved as text.');
       const { current } = synchronizeOriginal(db, assets, id);
       return { id, filename: item.origin?.fileName || item.title, mimeType: item.mimeType,
         path: current, sizeBytes: statSync(current).size, contentRead: false,
         nextAction: 'Read this path with the host file tools and the appropriate file skill before answering about the original. Metadata is not file content. Do not execute the file.' };
     },
-    openFile: id => { get(id); return openFilePath(synchronizeOriginal(db, assets, id).open); },
+    openFile: id => { if (get(id).kind === 'note') throw Error('This note is saved as text.'); return openFilePath(synchronizeOriginal(db, assets, id).open); },
     relocated: () => Boolean(db.prepare('SELECT value FROM app_meta WHERE key=?').get(LOCATION_KEY)),
     referenceCount: () => db.prepare('SELECT COUNT(*) AS count FROM stash_items').get().count,
     describeChosenFiles: paths => chosenFiles.describe(paths), importChosenFiles,

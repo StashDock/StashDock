@@ -6,7 +6,7 @@ import { Alert } from '../../components/arc/alert/alert';
 import { useCopyFeedback } from '../../components/arc/lib/use-copy-feedback';
 import copyStyles from '../../components/CopyForAI.module.css';
 import { IntegrationIcon } from './IntegrationIcon';
-import { applicationWebsite, githubUrl, installationUrl, integrationCatalog, integrationGuides, referencePurpose, safariSetupSteps, type IntegrationId, type IntegrationInfo } from './integrations';
+import { applicationWebsite, githubUrl, installationUrl, integrationCatalog, integrationGuides, referencePurpose, safariSetupSteps, aiSetupSteps, type IntegrationId, type IntegrationInfo } from './integrations';
 import { useI18n } from './locale';
 import styles from './IntegrationSections.module.css';
 import { errorText } from '../../lib/errorText';
@@ -14,18 +14,15 @@ import { errorText } from '../../lib/errorText';
 export function IntegrationGuide({ id, kind, info, openApp, openLink }: { id: IntegrationId; kind: 'usage' | 'setup'; info: IntegrationInfo | null; openApp?: (id: IntegrationId) => Promise<unknown>; openLink: (url: string) => Promise<unknown> }) {
   const { t } = useI18n();
   const entry = integrationCatalog[id], usage = kind === 'usage' ? integrationGuides[id] : null;
-  const repository = githubUrl(info), install = installationUrl(info, id), copy = useCopyFeedback();
+  const ai = id === 'codex' || id === 'dsh' || id === 'claude';
+  const repository = githubUrl(info), install = ai ? null : installationUrl(info, id), copy = useCopyFeedback();
   const [pending, setPending] = useState(false), [error, setError] = useState('');
   const alive = useRef(false), flight = useRef(false);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  const ai = id === 'codex' || id === 'claude';
   const bundledSafari = id === 'safari' && info?.platform === 'macos';
   const canOpen = Boolean(applicationWebsite(id) || info?.items.some(item => item.id === id && item.detected) || install || repository);
-  const steps = usage?.steps ?? (bundledSafari ? safariSetupSteps : ai ? [
-    install ? 'Open the installation page below.' : 'Copy the GitHub link below.',
-    install ? 'Install StashDock, then open {name}.' : 'Open {name} and ask it to install StashDock from that link.',
-    'Open StashDock from the side panel.',
-  ] : id === 'chrome' ? ['Open the Chrome Web Store below.', 'Click Add to Chrome, then confirm with Add extension.', 'Pin StashDock, then open a page and click it to save.']
+  const steps = usage?.steps ?? (bundledSafari ? safariSetupSteps : ai ? aiSetupSteps
+    : id === 'chrome' ? ['Open the Chrome Web Store below.', 'Click Add to Chrome, then confirm with Add extension.', 'Pin StashDock, then open a page and click it to save.']
     : id === 'desktop' ? ['Get StashDock Desktop from the link below.', 'Open the app after installation.', 'Click Import references to add a link, file or note.']
     : ['Get the browser extension from the link below.', 'Install the extension in {name}.', 'Open a page and click StashDock to save it.']);
   async function run(task: () => Promise<unknown>) {

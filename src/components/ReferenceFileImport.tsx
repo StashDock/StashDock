@@ -59,7 +59,7 @@ export function ReferenceFileImport({ availableTags, disabled, onBusy, onSave, o
   };
   const identity = file ? fileReferenceType({ kind: 'file', title: file.name, mimeType: file.type }) : null;
   return <div className={`${styles.fields} ${styles.fileFlow}`}>
-    {!file || replacing ? <FileUpload showBrowse={false} droppable={false} onBrowse={onChoose ? pick : undefined} value={replacing ? [] : files} onChange={choose} multiple maxSize={FILE_REFERENCE_LIMIT} disabled={disabled || busy || coverReading} label={t("Choose files")} description={t(onChoose ? "Up to 30 MB each." : "Up to 5 MB each.")} />
+    {!file || replacing ? <FileUpload showBrowse={false} droppable={false} onBrowse={onChoose ? pick : undefined} value={replacing ? [] : files} onChange={choose} multiple maxSize={FILE_REFERENCE_LIMIT} disabled={disabled || busy || coverReading} label={t("Choose files")} description={t(onChoose ? "Up to 512 MB each." : "Up to 5 MB each.")} />
       : <div className={styles.fileHeading}>{identity && <ReferenceGlyph kind={identity.visual} size={20} />}<span data-tooltip={file.name}>{file.name}</span>{drafts.length > 1 && <DropdownMenu label={t("Edit file")} items={drafts.map((draft, index) => ({ label: draft.source.name, disabled: busy || reading || coverReading || Boolean(savedItems.current), onSelect: () => { setActive(index); setFile(draft.source); } }))} />}<Button type="button" variant="secondary" size="sm" disabled={busy || coverReading} onClick={() => setReplacing(true)}>{t("Replace files")}</Button></div>}
     {file && !replacing && <form className={`${styles.fields} ${styles.importForm}`} onSubmit={event => {
       event.preventDefault(); if (busy || reading || coverReading || disabled) return;

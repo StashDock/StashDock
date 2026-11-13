@@ -1,76 +1,67 @@
-// Note creation/migration writes a real managed .txt. Thereafter the file is
-// authoritative; SQLite content and search rows are refreshable projections.
-import { mkdirSync, writeFileSync, openSync, readSync, closeSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+// Import legacy Note TXT bodies once. Keep the old files available for recovery.
+import { openSync, readSync, closeSync } from 'node:fs';
 import { resolveManagedFile } from './open-file.mjs';
 import { fingerprint } from './original-files.mjs';
 
 const MAX_TEXT_BYTES = 5_000_000;
-function projection(path, assets) {
+function readLegacyText(path, assets) {
   let descriptor;
   try {
     const file = resolveManagedFile(path, assets);
     if (file.sizeBytes > MAX_TEXT_BYTES) return;
+    const before = fingerprint(file.path);
     descriptor = openSync(file.path, 'r');
-    // An editor can grow/replace the file after stat. Never read an unbounded
-    // allocation or cache a partial new version in that case.
-    const buffer = Buffer.alloc(Math.min(MAX_TEXT_BYTES, file.sizeBytes) + 1);
+    const buffer = Buffer.alloc(file.sizeBytes + 1);
     let length = 0, count;
     while (length < buffer.length && (count = readSync(descriptor, buffer, length, buffer.length - length, null))) length += count;
-    if (length !== file.sizeBytes) return;
-    return { file, content: new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, length)) };
+    const after = fingerprint(file.path);
+    if (length !== file.sizeBytes || !before || !after || before.size !== after.size || before.modifiedMs !== after.modifiedMs) return;
+    return { content: new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, length)), path: file.path, fingerprint: after };
   } catch { return; }
   finally { if (descriptor !== undefined) closeSync(descriptor); }
 }
-// A note whose file still has the size and modification time recorded at its
-// last projection is unchanged; only other notes are read again.
-const recorded = row => { try { return JSON.parse(row.origin_json || '{}')?.fileFingerprint; } catch { return undefined; } };
-const unchanged = (row, path) => {
-  let current; try { current = fingerprint(resolveManagedFile(path, row.assets).path); } catch { return { skip: true }; }
-  const previous = recorded(row);
-  return { current, skip: Boolean(current && previous && previous.size === current.size && previous.modifiedMs === current.modifiedMs) };
-};
-export function synchronizeNoteFiles(db, assets, id) {
+
+export function migrateNoteFiles(db, assets, id) {
+  const query = db.prepare(`SELECT id,asset_path,origin_json FROM stash_items
+    WHERE kind='note' AND asset_path<>''${id === undefined ? '' : ' AND id=?'}`);
+  const rows = id === undefined ? query.all() : query.all(id);
+  let candidates = [], bytes = 0;
+  for (const row of rows) {
+    const text = readLegacyText(row.asset_path, assets);
+    if (!text) continue;
+    const length = Buffer.byteLength(text.content);
+    if (candidates.length >= 64 || bytes + length > 8_000_000) {
+      migrateBatch(db, candidates);
+      candidates = []; bytes = 0;
+    }
+    candidates.push({ ...row, ...text }); bytes += length;
+  }
+  migrateBatch(db, candidates);
+}
+
+function migrateBatch(db, candidates) {
+  if (!candidates.length) return;
   const ownsTransaction = !db.isTransaction;
-  const created = [];
-  // Never select cover blobs or cached bodies here. Unchanged projections don't need a writer
-  // reservation; re-read under the transaction when an actual change is found.
-  const query = db.prepare(`SELECT id,title,asset_path,origin_json,size_bytes FROM stash_items WHERE kind='note'${id === undefined ? '' : ' AND id=?'}`);
-  const readRows = () => id === undefined ? query.all() : query.all(id);
-  const rows = readRows();
-  if (ownsTransaction && !rows.some(row => !row.asset_path || !unchanged({ ...row, assets }, row.asset_path).skip)) return;
   if (ownsTransaction) db.exec('BEGIN IMMEDIATE');
   try {
-    for (const row of ownsTransaction ? readRows() : rows) {
-      let path = row.asset_path, origin;
+    const current = db.prepare("SELECT origin_json FROM stash_items WHERE id=? AND kind='note' AND asset_path=?");
+    const save = db.prepare(`UPDATE stash_items SET asset_path=NULL,original_path=NULL,mime_type=NULL,size_bytes=NULL,
+      content=?,excerpt=?,origin_json=? WHERE id=?`);
+    for (const candidate of candidates) {
+      const row = current.get(candidate.id, candidate.asset_path);
+      const latest = fingerprint(candidate.path);
+      if (!row || !latest || latest.size !== candidate.fingerprint.size || latest.modifiedMs !== candidate.fingerprint.modifiedMs) continue;
+      let origin;
       try { origin = JSON.parse(row.origin_json || '{}'); } catch { origin = {}; }
       if (!origin || typeof origin !== 'object' || Array.isArray(origin)) origin = {};
-      if (!path) {
-        const title = Array.from(row.title).slice(0, 48).map(c => /[\p{Cc}<>:"/\\|?*]/u.test(c) ? '-' : c).join('').replace(/^[ .]+|[ .]+$/g, '') || 'Untitled';
-        const filename = `Note - ${title}.txt`;
-        mkdirSync(assets, { recursive: true });
-        path = join(assets, `${randomUUID()}-${filename}`);
-        // Only a legacy note without its managed original needs cached text.
-        // Read it under the same write transaction as the migration.
-        const legacy = db.prepare('SELECT content,excerpt FROM stash_items WHERE id=?').get(row.id);
-        writeFileSync(path, legacy?.content ?? legacy?.excerpt ?? '', { encoding: 'utf8', flag: 'wx' });
-        created.push(path); origin = { ...origin, fileName: filename };
-      }
-      const state = path === row.asset_path ? unchanged({ ...row, assets }, path) : { skip: false };
-      if (state.skip) continue;
-      // Do not recreate missing managed files from an old database projection.
-      const next = projection(path, assets);
-      if (!next) continue;
-      const { file, content } = next;
-      const current = state.current ?? fingerprint(file.path);
-      if (current) origin = { ...origin, fileFingerprint: current };
-      db.prepare("UPDATE stash_items SET asset_path=?,mime_type='text/plain',size_bytes=?,content=?,excerpt=?,origin_json=? WHERE id=?")
-        .run(path, file.sizeBytes, content, Array.from(content.replace(/\s+/g, ' ')).slice(0, 180).join(''), JSON.stringify(origin), row.id);
+      delete origin.fileName;
+      delete origin.fileFingerprint;
+      const { content } = candidate;
+      save.run(content, Array.from(content.replace(/\s+/g, ' ')).slice(0, 180).join(''), JSON.stringify(origin), candidate.id);
     }
     if (ownsTransaction) db.exec('COMMIT');
   } catch (error) {
-    if (ownsTransaction) { db.exec('ROLLBACK'); for (const path of created) unlinkSync(path); }
+    if (ownsTransaction) db.exec('ROLLBACK');
     throw error;
   }
 }

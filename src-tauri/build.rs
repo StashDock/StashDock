@@ -2,6 +2,7 @@ fn main() {
     #[cfg(target_os = "macos")]
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         println!("cargo:rerun-if-changed=native/PreviewRenderer.swift");
+        println!("cargo:rerun-if-changed=src/preview_ready.js");
         let target = std::env::var("TARGET").expect("Cargo target");
         let arch = match target.split('-').next().unwrap() {
             "aarch64" => "arm64",
@@ -11,6 +12,9 @@ fn main() {
         println!("cargo:rerun-if-changed=native/PreviewRenderer-Info.plist");
         let directory = std::path::Path::new("native-binaries/StashDockRenderer.app/Contents");
         std::fs::create_dir_all(directory.join("MacOS")).expect("Create native helper bundle");
+        std::fs::create_dir_all(directory.join("Resources")).expect("Create renderer resources");
+        let readiness = std::fs::read("src/preview_ready.js").expect("Read viewport readiness probe");
+        std::fs::write(directory.join("Resources/preview-ready.js"), &readiness).expect("Embed viewport readiness probe");
         let info = std::fs::read_to_string("native/PreviewRenderer-Info.plist")
             .expect("Native renderer bundle metadata")
             .replace("${VERSION}", env!("CARGO_PKG_VERSION"));
@@ -126,6 +130,8 @@ fn main() {
         let profile = out.ancestors().nth(3).expect("Cargo profile directory");
         let staged = profile.join("StashDockRenderer.app/Contents");
         std::fs::create_dir_all(staged.join("MacOS")).expect("Stage native helper bundle");
+        std::fs::create_dir_all(staged.join("Resources")).expect("Stage renderer resources");
+        std::fs::write(staged.join("Resources/preview-ready.js"), &readiness).expect("Stage viewport readiness probe");
         std::fs::copy(&binary, staged.join("MacOS/stashdock-render"))
             .expect("Stage native renderer executable");
         std::fs::write(staged.join("Info.plist"), info).expect("Stage native renderer metadata");

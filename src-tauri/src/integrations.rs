@@ -96,7 +96,10 @@ pub fn record_with_extension(
     path: Option<&str>,
     extension_id: Option<&str>,
 ) -> Result<(), String> {
-    if !["desktop", "codex", "chrome", "edge", "firefox", "safari"].contains(&id)
+    if ![
+        "desktop", "codex", "dsh", "chrome", "edge", "firefox", "safari",
+    ]
+    .contains(&id)
         || version.len() > 40
         || version.is_empty()
         || !version
@@ -262,12 +265,43 @@ pub fn browser_origin_allowed(db: &Connection, origin: &str) -> bool {
                 })
         })
 }
+fn dsh_plugin_detected(manifest: &std::path::Path) -> bool {
+    fn package(path: &std::path::Path) -> Option<Value> {
+        if std::fs::metadata(path).ok()?.len() > 2_000_000 {
+            return None;
+        }
+        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+    }
+    if !manifest.is_absolute()
+        || !manifest.is_file()
+        || package(manifest).is_none_or(|value| value["name"].as_str() != Some("stashdock-dsh"))
+        || !manifest
+            .parent()
+            .is_some_and(|parent| parent.join("index.mjs").is_file())
+    {
+        return false;
+    }
+    manifest
+        .ancestors()
+        .skip(2)
+        .take(12)
+        .find_map(|directory| {
+            let value = package(&directory.join("package.json"))?;
+            let profile = value.get("dsh")?.get("profile")?;
+            Some(profile["bundles"].as_array().is_some_and(|bundles| {
+                bundles
+                    .iter()
+                    .any(|item| item.as_str() == Some("stashdock-dsh"))
+            }))
+        })
+        .unwrap_or(false)
+}
 pub fn read(db: &Connection) -> Result<Value, String> {
     let config: Value =
         serde_json::from_str(include_str!("../product-links.json")).map_err(|e| e.to_string())?;
     let mut items = Vec::new();
     for id in [
-        "chrome", "edge", "firefox", "safari", "codex", "claude", "desktop",
+        "chrome", "edge", "firefox", "safari", "codex", "dsh", "claude", "desktop",
     ] {
         // SafariServices owns current enablement. A first-time installation
         // need not have saved a page or registered a provider handshake yet.
@@ -291,6 +325,7 @@ pub fn read(db: &Connection) -> Result<Value, String> {
                         && std::path::Path::new(path).is_file()
                         && (id != "codex"
                             || crate::codex_presence::detected(std::path::Path::new(path)))
+                        && (id != "dsh" || dsh_plugin_detected(std::path::Path::new(path)))
                 } else {
                     crate::browser_presence::detected(
                         id,
@@ -299,14 +334,22 @@ pub fn read(db: &Connection) -> Result<Value, String> {
                 }
         });
         if id == "chrome" && !detected {
-            let edge: Option<String> = db.query_row(
-                "SELECT value FROM app_meta WHERE key='installation_edge_v1'", [], |row| row.get(0),
-            ).optional().map_err(|e| e.to_string())?;
+            let edge: Option<String> = db
+                .query_row(
+                    "SELECT value FROM app_meta WHERE key='installation_edge_v1'",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?;
             let edge = edge.and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
             detected = edge.is_some_and(|record| {
                 record["version"].is_string()
                     && record["extensionId"] == config["browserExtensions"]["chrome"]["id"]
-                    && crate::browser_presence::detected("edge", record["extensionId"].as_str().unwrap_or_default())
+                    && crate::browser_presence::detected(
+                        "edge",
+                        record["extensionId"].as_str().unwrap_or_default(),
+                    )
             });
         }
         items.push(json!({"id":id,"detected":detected}));
@@ -339,6 +382,36 @@ pub async fn get_integration_status(app: AppHandle) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dsh_presence_requires_the_registered_package_and_profile_bundle() {
+        let root =
+            std::env::temp_dir().join(format!("stashdock-dsh-presence-{}", uuid::Uuid::new_v4()));
+        let directory = root.join("node_modules/stashdock-dsh");
+        std::fs::create_dir_all(&directory).unwrap();
+        let manifest = directory.join("package.json");
+        std::fs::write(&manifest, r#"{"name":"stashdock-dsh","version":"1.1.0"}"#).unwrap();
+        std::fs::write(directory.join("index.mjs"), "export {};").unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dsh":{"profile":{"bundles":["stashdock-dsh"]}}}"#,
+        )
+        .unwrap();
+        assert!(dsh_plugin_detected(&manifest));
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dsh":{"profile":{"bundles":[]}}}"#,
+        )
+        .unwrap();
+        assert!(!dsh_plugin_detected(&manifest));
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dsh":{"profile":{"bundles":["stashdock-dsh"]}}}"#,
+        )
+        .unwrap();
+        std::fs::remove_file(directory.join("index.mjs")).unwrap();
+        assert!(!dsh_plugin_detected(&manifest));
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn pinned_origins_register_without_reading_private_profiles() {
         let db = Connection::open_in_memory().unwrap();

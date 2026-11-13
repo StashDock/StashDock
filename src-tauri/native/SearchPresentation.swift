@@ -394,7 +394,7 @@ private struct SearchHoverTarget: Equatable {
     private var pressedVirtual: Int?
     private var pressedCopy = false
     private var dragWanted = false, dragStarted = false
-    private var files: [URL] = []
+    private var dragWriters: [NSPasteboardWriting] = []
     private var exportToken = "", exportSession = ""
     private var dragCard: SearchCardLayer?
     override var isFlipped: Bool { true }
@@ -659,7 +659,7 @@ private struct SearchHoverTarget: Equatable {
         pressedCopy = card.virtual == owner.selected && card.copyRect.contains(point) && (card.hovered || owner.flowFocused || owner.copiedId == card.card.id)
         if pressedCopy { tween(card.copy,"transform.scale",to:0.97,duration:SearchDesign.duration("instant")); tween(card.copy,"opacity",to:0.84,duration:SearchDesign.duration("instant")) }
         press = event; pressedVirtual = card.virtual; dragCard = card
-        dragWanted = false; dragStarted = false; files = []
+        dragWanted = false; dragStarted = false; dragWriters = []
         exportToken = UUID().uuidString; exportSession = owner.session
     }
     override func mouseDragged(with event:NSEvent) {
@@ -671,24 +671,30 @@ private struct SearchHoverTarget: Equatable {
         _ = beginIfReady()
     }
     override func mouseUp(with event:NSEvent) {
-        defer { press = nil; pressedVirtual = nil; files = []; pressedCopy = false }
+        defer { press = nil; pressedVirtual = nil; dragWriters = []; pressedCopy = false }
         guard press != nil, !dragWanted, !dragStarted, let virtual = pressedVirtual, let owner else { return }
         if pressedCopy, let dragCard { searchScaleSpring(dragCard.copy,to:1,spring:"snappy") }
         guard let (card,point) = hit(convert(event.locationInWindow,from:nil)), card.virtual == virtual else { return }
         if pressedCopy { if card.copyRect.contains(point) { owner.copyCurrent() }; return }
         if virtual == owner.selected { owner.openLibrary() } else { go(virtual); trackPointer(convert(event.locationInWindow,from:nil)) }
     }
-    func prepared(_ token:String, paths:[String]) -> Bool {
+    func prepared(_ token:String, paths:[String], text:String?) -> Bool {
         guard token == exportToken, press != nil else { return false }
-        files = paths.map { URL(fileURLWithPath:$0) }
+        if let text {
+            let item = NSPasteboardItem()
+            guard item.setString(text,forType:.string) else { return false }
+            dragWriters = [item]
+        } else {
+            dragWriters = paths.map { NSURL(fileURLWithPath:$0) }
+        }
         return beginIfReady()
     }
     private func beginIfReady() -> Bool {
-        guard dragWanted, !dragStarted, let press, !files.isEmpty, let dragCard,
+        guard dragWanted, !dragStarted, let press, !dragWriters.isEmpty, let dragCard,
               NSEvent.pressedMouseButtons & 1 != 0, window?.windowNumber == press.windowNumber else { return false }
         let frame = dragCard.root.convert(dragCard.root.bounds,to:layer)
-        let items = files.enumerated().map { i,url in
-            let item = NSDraggingItem(pasteboardWriter:url as NSURL)
+        let items = dragWriters.enumerated().map { i,writer in
+            let item = NSDraggingItem(pasteboardWriter:writer)
             item.setDraggingFrame(frame,contents:i == 0 ? dragCard.dragImage() : nil); return item
         }
         dragStarted = true; owner?.dragging = true; owner?.draggingFlow = self
@@ -698,7 +704,7 @@ private struct SearchHoverTarget: Equatable {
     }
     func draggingSession(_ session:NSDraggingSession,sourceOperationMaskFor context:NSDraggingContext) -> NSDragOperation { .copy }
     func draggingSession(_ session:NSDraggingSession,endedAt point:NSPoint,operation:NSDragOperation) {
-        press = nil; files = []; dragCard = nil
+        press = nil; dragWriters = []; dragCard = nil
         owner?.send("dragFinished",["token":exportToken,"dropped":operation.contains(.copy)],session:exportSession)
         owner?.dragging = false; owner?.updatePointer()
         let owner = owner

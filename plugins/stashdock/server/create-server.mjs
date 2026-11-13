@@ -9,7 +9,7 @@ import { detail, faviconOrigins, prepareAttachment, search, summary, visualSumma
 import { createLocalLibrary } from './local-library.mjs';
 import { startCaptureBridge } from './capture-bridge.mjs';
 import { startPreviewWorker, packagedPreviewService } from './preview-worker.mjs';
-import { buildContext } from '../../../src/lib/context-format.mjs';
+import { buildContext, editorContext } from '../../../src/lib/context-format.mjs';
 import { openCaptureSite } from './open-capture-site.mjs';
 import { createIntegrationStatusReader } from './integration-status.mjs';
 import { openIntegration } from './open-integration.mjs';
@@ -34,11 +34,13 @@ const guarded = callback => async args => {
   catch (error) { return { content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], isError: true }; }
 };
 
-export function createServer({ dataDir, captureBridge = false, captureBridgePort = 17864, previewWorker = captureBridge, htmlUrl, importServices, storageServices }) {
+export function createServer({ dataDir, captureBridge = false, captureBridgePort = 17864, previewWorker = captureBridge, htmlUrl, importServices, storageServices,
+  pluginKind = 'chatgpt', pluginVersion = PLUGIN_VERSION, installationPath }) {
   const library = createLocalLibrary({ dataDir });
   const readIntegrationStatus = createIntegrationStatusReader(library);
   const storageService = storageServices || createStorageService(library, htmlUrl);
-  if (captureBridge) library.registerInstallation('codex', PLUGIN_VERSION, fileURLToPath(new URL('../.codex-plugin/plugin.json', htmlUrl)));
+  if (pluginKind === 'dsh' && installationPath) library.registerInstallation('dsh', pluginVersion, installationPath);
+  else if (captureBridge) library.registerInstallation('codex', PLUGIN_VERSION, fileURLToPath(new URL('../.codex-plugin/plugin.json', htmlUrl)));
   const previewService = packagedPreviewService(htmlUrl, library.dataDir || dataDir);
   importServices ??= { readBrowser: previewService.readBrowser, sources: previewService.sources, bookmarks: previewService.bookmarks, icons: previewService.icons, preview: previewService.lookup, openCaptureSite };
   const prepareCover = importServices.prepareCover ?? previewService.prepareCover;
@@ -50,7 +52,7 @@ export function createServer({ dataDir, captureBridge = false, captureBridgePort
   const previews = previewWorker ? startPreviewWorker(library.dataDir, htmlUrl, previewService) : undefined;
   const iconUrl = new URL('../assets/icon.png', htmlUrl);
   const icons = [{ src: `data:image/png;base64,${readFileSync(iconUrl).toString('base64')}`, mimeType: 'image/png' }];
-  const server = new McpServer({ name: 'stashdock', version: PLUGIN_VERSION, icons });
+  const server = new McpServer({ name: 'stashdock', version: pluginVersion, icons });
   const close = server.close.bind(server);
   server.close = async () => { storageService.close?.(); bridge?.close(); await Promise.all([previewService.close(), previews?.close()]); await close(); library.close?.(); };
   let resourceDomains = [];
@@ -124,20 +126,21 @@ export function createServer({ dataDir, captureBridge = false, captureBridgePort
   // App-only data tools do not attach a UI template: searches must not remount it.
   server.registerTool('list_stashdock_shelf', {
     description: 'Read the visual shelf, without full captured bodies. Only called from the MCP App.',
-    inputSchema: { ...searchSchema, collection: z.enum(['all', 'recent', 'web', 'files', 'favorites']).optional(), offset: z.number().int().min(0).max(100_000).optional() }, annotations: readOnly,
+    inputSchema: { ...searchSchema, sort: z.enum(['newest', 'oldest', 'most-used']).optional(), collection: z.enum(['all', 'recent', 'web', 'files', 'favorites']).optional(), offset: z.number().int().min(0).max(100_000).optional() }, annotations: readOnly,
     _meta: { ui: { visibility: ['app'] } },
   }, guarded(async args => {
     if (library.readShelf) {
       const result = await library.readShelf(args);
       return { ...valueResult({ count: result.items.length, hasMore: result.hasMore }),
-        _meta: { items: result.items.map(item => visualSummary(item, resourceDomains)), tags: result.tags } };
+        _meta: { items: result.items.map(item => visualSummary(item, resourceDomains)), tags: result.tags, sort: result.sort } };
     }
     const rows = await library.read();
-    const matches = search(rows, { ...args, limit: args.limit ?? 30 });
+    const sort = args.sort ?? library.getSort?.() ?? 'newest';
+    const matches = search(rows, { ...args, sort, limit: args.limit ?? 30 });
     const counts = new Map();
     for (const row of rows) for (const tag of row.tags || []) counts.set(tag, (counts.get(tag) || 0) + 1);
     return { ...valueResult({ count: matches.items.length, hasMore: matches.hasMore }),
-      _meta: { items: matches.items.map(item => visualSummary(item, resourceDomains)), tags: [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([name, count]) => ({ name, count })) } };
+      _meta: { items: matches.items.map(item => visualSummary(item, resourceDomains)), sort, tags: [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([name, count]) => ({ name, count })) } };
   }));
   server.registerTool('select_stashdock_shelf', {
     description: 'Read IDs of all references matching the current shelf filters. Does not change the draft or library.',
@@ -149,19 +152,29 @@ export function createServer({ dataDir, captureBridge = false, captureBridgePort
   }));
   server.registerTool('prepare_stashdock_attachment', {
     description: 'Prepare a read-only Markdown snapshot of selected saved references. Does not send a message or modify the draft.',
-    inputSchema: { ids: z.array(z.string().min(1).max(200)).min(1).max(30) }, annotations: readOnly,
+    inputSchema: { ids: z.array(z.string().min(1).max(200)).min(1).max(30), fileDelivery: z.enum(['tools', 'native']).optional() }, annotations: readOnly,
     _meta: { ui: { visibility: ['app'] } },
-  }, guarded(async ({ ids }) => {
+  }, guarded(async ({ ids, fileDelivery }) => {
     const rows = await (library.readItems?.(ids) ?? library.read());
     // Fail before draft feedback when an original is missing or escapes assets.
-    for (const item of rows.filter(item => ids.includes(item.id) && item.assetPath)) library.resolveFile(item.id);
-    const attachment = prepareAttachment(rows, ids);
+    for (const item of rows.filter(item => ids.includes(item.id) && item.kind !== 'note' && item.assetPath)) library.resolveFile(item.id);
+    const attachment = prepareAttachment(rows, ids, fileDelivery);
     return { ...valueResult({ title: attachment.title, ids: attachment.ids }), _meta: { attachment } };
   }));
   const appOnly = { ui: { visibility: ['app'] } };
+  server.registerTool('set_stashdock_sort', {
+    description: 'Save the reference order selected in the library menu.',
+    inputSchema: { sort: z.enum(['newest', 'oldest', 'most-used']) },
+    annotations: { ...readOnly, readOnlyHint: false }, _meta: appOnly,
+  }, guarded(async ({ sort }) => { await library.setSort(sort); return valueResult({ sort }); }));
+  server.registerTool('record_stashdock_use', {
+    description: 'Record references after the host has accepted Add to chat. Never call before draft delivery succeeds.',
+    inputSchema: { ids: z.array(z.string().min(1).max(120)).min(1).max(10000), operationId: z.string().regex(/^[a-zA-Z0-9_-]{1,120}$/) },
+    annotations: { ...readOnly, readOnlyHint: false }, _meta: appOnly,
+  }, guarded(async ({ ids, operationId }) => valueResult(await library.recordUse(ids, operationId))));
   server.registerTool('open_stashdock_integration', {
     description: 'Open the app chosen in StashDock Settings. Prefer its installed client, otherwise its official website.',
-    inputSchema: { id: z.enum(['chrome', 'edge', 'firefox', 'safari', 'codex', 'claude', 'desktop']) },
+    inputSchema: { id: z.enum(['chrome', 'edge', 'firefox', 'safari', 'codex', 'dsh', 'claude', 'desktop']) },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }, _meta: appOnly,
   }, guarded(async ({ id }) => valueResult(await openIntegration(id, { desktopPath: library.desktopExecutable?.() }))));
   server.registerTool('get_stashdock_integrations', {
@@ -176,12 +189,14 @@ export function createServer({ dataDir, captureBridge = false, captureBridgePort
     if (!library.getCodexPreferences) throw Error('Settings require the independent local library.');
     const repository = productLinks.githubRepository;
     const githubUrl = typeof repository === 'string' && /^[\w.-]+\/[\w.-]+$/.test(repository) ? `https://github.com/${repository}` : null;
-    return { ...valueResult({}), _meta: { settings: { preferences: library.getCodexPreferences(), version: PLUGIN_VERSION, githubUrl } } };
+    return { ...valueResult({}), _meta: { settings: { preferences: library.getCodexPreferences(), version: pluginVersion, githubUrl } } };
   }));
   server.registerTool('check_stashdock_plugin_updates', {
     description: 'Check GitHub Releases for a newer StashDock plugin package, from Settings. Does not download or install anything.', inputSchema: {},
     annotations: { ...readOnly, openWorldHint: true }, _meta: appOnly,
-  }, guarded(async () => ({ ...valueResult({}), _meta: { update: await checkPluginUpdates({ repository: productLinks.githubRepository, current: PLUGIN_VERSION }) } })));
+  }, guarded(async () => ({ ...valueResult({}), _meta: { update: await checkPluginUpdates({
+    repository: productLinks.githubRepository, current: pluginVersion, pluginKind,
+  }) } })));
   server.registerTool('save_stashdock_preferences', {
     description: 'Save only the language or theme explicitly chosen in the Codex panel. Does not change desktop preferences.',
     inputSchema: { preferences: z.object({ language: z.enum(['system', 'en', 'zh']).optional(), theme: z.enum(['system', 'light', 'dark']).optional() }).strict().refine(value => Object.keys(value).length > 0) },
@@ -265,7 +280,7 @@ export function createServer({ dataDir, captureBridge = false, captureBridgePort
   }, guarded(async ({ id }) => {
     const item = (await (library.readItems?.([id]) ?? library.read())).find(value => value.id === id);
     if (!item) throw new Error('This reference no longer exists. Refresh the shelf.');
-    return { ...valueResult({ id }), _meta: { item, context: buildContext([item]) } };
+    return { ...valueResult({ id }), _meta: { item, context: editorContext(item) } };
   }));
   const write = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false };
   const id = z.string().min(1).max(200);
@@ -314,9 +329,9 @@ export function createServer({ dataDir, captureBridge = false, captureBridgePort
   }, async ({ files, tags }) => {
     const prepared = [];
     for (const file of files) prepared.push(file.preview === undefined ? file : { ...file, preview: await normalizeCover(file.preview) });
-    return { items: library.importChosenFiles(prepared, tags).map(summary) };
+    return { items: (await library.importChosenFiles(prepared, tags)).map(summary) };
   }, false, false);
-  registerWrite('open_stashdock_file', 'Open a saved file or note (.txt) in its default application. Accepts a reference ID, not a path.', { id }, ({ id }) => library.openFile(id), false);
+  registerWrite('open_stashdock_file', 'Open a saved file in its default application. Accepts a reference ID, not a path.', { id }, ({ id }) => library.openFile(id), false);
   registerWrite('set_stashdock_favorite', 'Set a reference favorite from its App button.', { id, favorite: z.boolean() }, args => ({ item: summary(library.setFavorite(args.id, args.favorite)) }));
   registerWrite('set_stashdock_tags', 'Replace tags on references selected by the user in the App.', { ids: z.array(id).min(1).max(30), tags: tagList }, args => ({ items: library.setTags(args.ids, args.tags).map(summary) }));
   registerWrite('edit_stashdock_reference', 'Save the title, tags and optional cover explicitly edited in the App.', { id, title: z.string().trim().min(1).max(500), tags: tagList, cover: z.object({ preview: z.string().max(750_000).nullable() }).strict().optional() }, async args => {

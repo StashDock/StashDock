@@ -76,7 +76,7 @@ test('relocated native helpers use a fresh user default library without develope
   mkdirSync(join(fixture,'Plugin 安装','scripts'));
   cpSync(resolve('plugins/stashdock/scripts/register-browser-host.mjs'),registration);
   const {registerBrowserHost}=await import(pathToFileURL(registration));
-  const calls=[];registerBrowserHost({},'win32',(...args)=>calls.push(args));
+  const calls=[];await registerBrowserHost({ env: {}, platform: 'win32', run: (...args)=>calls.push(args) });
   assert.equal(calls[0][0],resolve(fixture,'Plugin 安装',`bin/win32-x64/stashdock-browser.exe`));
   assert.deepEqual(calls[0][1],['--register','plugin']);
 });

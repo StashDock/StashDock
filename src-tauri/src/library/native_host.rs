@@ -207,6 +207,52 @@ pub(super) fn manifest(path: &Path, provider: &str, firefox: bool) -> Value {
     }
     value
 }
+#[cfg(any(windows, target_os = "macos", test))]
+pub(super) fn has_usable_registration(path: &Path, provider: &str, firefox: bool) -> bool {
+    let Some(value) = fs::File::open(path).ok().and_then(|file| {
+        let mut bytes = Vec::new();
+        file.take(65_537).read_to_end(&mut bytes).ok()?;
+        if bytes.len() > 65_536 {
+            return None;
+        }
+        serde_json::from_slice::<Value>(&bytes).ok()
+    }) else {
+        return false;
+    };
+    let Some(executable) = value["path"].as_str().map(Path::new) else {
+        return false;
+    };
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if !fs::metadata(executable).is_ok_and(|entry| entry.permissions().mode() & 0o111 != 0) {
+            return false;
+        }
+    }
+    let allowed = if firefox {
+        "allowed_extensions"
+    } else {
+        "allowed_origins"
+    };
+    let expected = manifest(executable, provider, firefox);
+    executable.is_absolute()
+        && executable.is_file()
+        && value["name"] == expected["name"]
+        && value["type"] == expected["type"]
+        && value[allowed].as_array().is_some_and(|current| {
+            expected[allowed]
+                .as_array()
+                .is_some_and(|required| required.iter().all(|identity| current.contains(identity)))
+        })
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Registration {
+    Replace,
+    Ensure,
+    Remove,
+}
+
 pub(super) fn atomic_json(path: &Path, value: &Value) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
     if fs::read(path).ok().as_deref() == Some(&bytes) {
@@ -324,7 +370,11 @@ fn registry_remove_owned(key: &str, expected: &Path) -> Result<(), String> {
     }
     Ok(())
 }
-pub(crate) fn register(provider: &str, executable: &Path, remove: bool) -> Result<(), String> {
+pub(crate) fn register(
+    provider: &str,
+    executable: &Path,
+    mode: Registration,
+) -> Result<(), String> {
     if !["desktop", "plugin"].contains(&provider)
         || !executable.is_absolute()
         || !executable.is_file()
@@ -336,11 +386,11 @@ pub(crate) fn register(provider: &str, executable: &Path, remove: bool) -> Resul
     }
     #[cfg(target_os = "macos")]
     {
-        return super::native_install::register(provider, executable, remove);
+        return super::native_install::register(provider, executable, mode);
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
-        let _ = remove;
+        let _ = mode;
         Err("Native host installation must be integrated and verified on this platform.".into())
     }
     #[cfg(windows)]
@@ -352,6 +402,7 @@ pub(crate) fn register(provider: &str, executable: &Path, remove: bool) -> Resul
             .parent()
             .ok_or("Invalid browser host installation.")?
             .join("browser-hosts");
+        let remove = mode == Registration::Remove;
         if !remove {
             fs::create_dir_all(&root).map_err(|e| e.to_string())?;
         }
@@ -363,6 +414,16 @@ pub(crate) fn register(provider: &str, executable: &Path, remove: bool) -> Resul
                 _ => "Mozilla",
             };
             let key = format!("Software\\{vendor}\\NativeMessagingHosts\\{HOST_PREFIX}.{provider}");
+            if mode == Registration::Ensure
+                && registry_manifest(&key)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|existing| {
+                        has_usable_registration(&existing, provider, browser == "firefox")
+                    })
+            {
+                continue;
+            }
             if remove {
                 // An older uninstaller must not remove a newer installation.
                 let ours = fs::read(&file)
@@ -391,12 +452,20 @@ pub(crate) fn register(provider: &str, executable: &Path, remove: bool) -> Resul
 }
 pub(crate) fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if args.len() == 2 && ["--register", "--unregister"].contains(&args[0].as_str()) {
-        return register(
-            &args[1],
-            &std::env::current_exe().map_err(|e| e.to_string())?,
-            args[0] == "--unregister",
-        );
+    if let [operation, provider] = args.as_slice() {
+        let mode = match operation.as_str() {
+            "--register" => Some(Registration::Replace),
+            "--ensure" => Some(Registration::Ensure),
+            "--unregister" => Some(Registration::Remove),
+            _ => None,
+        };
+        if let Some(mode) = mode {
+            return register(
+                provider,
+                &std::env::current_exe().map_err(|e| e.to_string())?,
+                mode,
+            );
+        }
     }
     // Bounds an interrupted pipe, blocked disk and database work without a
     // permanently resident process. SQLite transactions remain atomic on exit.
@@ -491,5 +560,23 @@ mod tests {
             }
             assert_eq!(origins.len(), ids.len());
         }
+    }
+
+    #[test]
+    fn ensure_recognizes_a_valid_provider_and_rejects_missing_or_stale_manifests() {
+        let root = std::env::temp_dir().join(format!("stashdock-ensure-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("plugin.chrome.json");
+        let helper = std::env::current_exe().unwrap();
+        assert!(!has_usable_registration(&path, "plugin", false));
+        let mut data = manifest(&helper, "plugin", false);
+        atomic_json(&path, &data).unwrap();
+        assert!(has_usable_registration(&path, "plugin", false));
+        assert!(!has_usable_registration(&path, "desktop", false));
+        data["path"] = json!(root.join("missing-helper"));
+        atomic_json(&path, &data).unwrap();
+        assert!(!has_usable_registration(&path, "plugin", false));
+        fs::remove_file(path).unwrap();
+        fs::remove_dir(root).unwrap();
     }
 }

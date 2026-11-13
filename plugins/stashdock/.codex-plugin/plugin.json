@@ -1,6 +1,6 @@
 {
   "name": "stashdock",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Find reusable AI context, browse tag groups and save useful notes and links to StashDock.",
   "author": {
     "name": "StashDock contributors"

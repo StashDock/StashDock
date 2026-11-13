@@ -1,5 +1,7 @@
 import { useI18n } from '../features/settings/locale';
-import { Plus, RefreshCw, Settings } from "lucide-react";
+import { Plus, Settings } from "lucide-react";
+import { ReferenceSortMenu } from './ReferenceSortMenu';
+import type { ReferenceSort } from '../lib/reference-sort.mjs';
 import { Button } from "./arc/button/button";
 import { SearchField } from "./arc/search-field/search-field";
 import { ReferenceViewToggle } from './ReferenceViewToggle';
@@ -10,7 +12,8 @@ type ToolbarProps = {
   query: string;
   searching?: boolean;
   refreshing: boolean;
-  onRefresh: () => void;
+  sort: ReferenceSort;
+  onSortChange: (sort: ReferenceSort) => void;
   view: "grid" | "list";
   searchRef: React.RefObject<HTMLInputElement | null>;
   onQueryChange: (value: string) => void;
@@ -22,7 +25,7 @@ type ToolbarProps = {
   tagControls?: React.ReactNode;
 };
 
-export function Toolbar({ compactBrand, query, searching = false, refreshing, onRefresh, view, searchRef, onQueryChange, onViewChange, onAdd, onSettings, settingsDisabled, collectionControls, tagControls }: ToolbarProps) {
+export function Toolbar({ compactBrand, query, searching = false, refreshing, sort, onSortChange, view, searchRef, onQueryChange, onViewChange, onAdd, onSettings, settingsDisabled, collectionControls, tagControls }: ToolbarProps) {
   const { t } = useI18n();
   return <header data-arc-ui className={styles.toolbar}>
     <div className={styles.headingRow}>
@@ -37,7 +40,7 @@ export function Toolbar({ compactBrand, query, searching = false, refreshing, on
       {collectionControls && <div className={styles.collectionControls}>{collectionControls}</div>}
       <div className={styles.viewActions}><ReferenceViewToggle value={view} onChange={onViewChange} /></div>
       {tagControls && <div className={styles.tagControls}>{tagControls}</div>}
-      <div className={styles.refreshAction}><Button type="button" variant="ghost" size="sm" loading={refreshing} onClick={onRefresh} aria-label={t("Refresh library")}><RefreshCw size={16} strokeWidth={1.75} aria-hidden="true" /></Button></div>
+      <div className={styles.sortAction}><ReferenceSortMenu value={sort} onChange={onSortChange} disabled={refreshing}/></div>
     </div>
   </header>;
 }

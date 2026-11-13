@@ -21,7 +21,7 @@ test('context modes use the shared labelled segmented control without a tooltip'
 
 test('narrow desktop keeps search and view together, filters and tag actions together', async () => {
   const css = await readFile('src/components/Toolbar.module.css', 'utf8');
-  assert.match(css, /"search views views" "filters tags refresh"/);
+  assert.match(css, /"search views views" "filters tags sort"/);
   const toolbar = await readFile('src/components/Toolbar.tsx', 'utf8');
   assert.match(toolbar, /onClick=\{onSettings\}/);
   assert.doesNotMatch(toolbar, /handleTitlebarDrag|window-titlebar/);

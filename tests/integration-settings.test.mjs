@@ -9,7 +9,7 @@ import { createLocalLibrary } from '../plugins/stashdock/server/local-library.mj
 import { checkSetup, createSetupConnection } from '../extension/setup-client.js';
 import { startCaptureBridge } from '../plugins/stashdock/server/capture-bridge.mjs';
 import { once } from 'node:events';
-import { readIntegrations, configuredCodexPlugin, codexPluginDetected, browserInstallationRecord } from '../plugins/stashdock/server/integrations.mjs';
+import { readIntegrations, configuredCodexPlugin, codexPluginDetected, dshPluginDetected, installationRecord, browserInstallationRecord } from '../plugins/stashdock/server/integrations.mjs';
 import { build } from 'esbuild';
 import { zh } from '../src/features/settings/messages.mjs';
 import { browserExtensionDetected, extensionEnabled } from '../plugins/stashdock/server/browser-presence.mjs';
@@ -214,6 +214,66 @@ test('approved purpose copy and complete localized guides cover every implemente
     for (const text of [guide.title, guide.description, ...guide.steps]) assert.ok(zh[text], `Missing guide translation: ${text}`);
     assert.ok(!guide.steps.some(step => /^Install/.test(step)), `Usage guide is an installation guide: ${id}`);
   }
+});
+
+test('DSH sits between ChatGPT and Claude with an actionable localized setup and usage guide', async () => {
+  const result = await build({ entryPoints: ['src/features/settings/integrations.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
+  const { agents, integrationCatalog, integrationGuides, aiSetupSteps, applicationWebsite } = await import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].text).toString('base64'));
+  assert.deepEqual(agents, ['codex', 'dsh', 'claude']);
+  assert.equal(integrationCatalog.dsh.name, 'DeepSeek Harness');
+  assert.equal(integrationCatalog.dsh.ready, true);
+  assert.equal(integrationCatalog.claude.ready, false);
+  assert.equal(applicationWebsite('dsh'), 'https://deepseek.com/harness');
+  assert.equal(integrationGuides.dsh.description, integrationGuides.codex.description);
+  assert.ok(aiSetupSteps.some(step => step.includes('ask it to install the StashDock plugin for {name}')));
+  assert.ok(aiSetupSteps.some(step => step.includes('fully quit and reopen')));
+  for (const text of aiSetupSteps) assert.ok(zh[text], text);
+});
+
+test('DSH installation presence is independent and rereads package removal and profile bundle changes', t => {
+  const root = mkdtempSync(join(tmpdir(), 'stashdock-dsh-presence-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const directory = join(root, 'node_modules', 'stashdock-dsh');
+  mkdirSync(directory, { recursive: true });
+  const manifest = join(directory, 'package.json');
+  writeFileSync(manifest, JSON.stringify({ name: 'stashdock-dsh', version: '1.1.0' }));
+  writeFileSync(join(directory, 'index.mjs'), 'export {};');
+  const profile = join(root, 'package.json');
+  writeFileSync(profile, JSON.stringify({ dsh: { profile: { bundles: ['stashdock-dsh'] } } }));
+  const record = installationRecord('dsh', '1.1.0', manifest);
+  const read = () => readIntegrations(key => key === record.key ? record.value : null);
+  assert.equal(dshPluginDetected(manifest), true);
+  assert.equal(read().items.find(item => item.id === 'dsh').detected, true);
+  assert.equal(read().items.find(item => item.id === 'codex').detected, false);
+  writeFileSync(profile, JSON.stringify({ dsh: { profile: { bundles: [] } } }));
+  assert.equal(dshPluginDetected(manifest), false);
+  writeFileSync(profile, JSON.stringify({ dsh: { profile: { bundles: ['stashdock-dsh'] } } }));
+  rmSync(join(directory, 'index.mjs'));
+  assert.equal(read().items.find(item => item.id === 'dsh').detected, false);
+});
+
+test('AI setup copies the repository and asks the named host to install even when a website guide exists', async () => {
+  const result = await build({ stdin: { contents: `
+    import React from 'react';
+    import { renderToStaticMarkup } from 'react-dom/server';
+    import { IntegrationGuide } from './src/features/settings/IntegrationGuide';
+    export const pages = ['codex', 'dsh'].map(id => renderToStaticMarkup(React.createElement(IntegrationGuide, {
+      id, kind:'setup', info:{items:[], links:{codex:'https://stashdock.app/guide#install-plugin',dsh:'https://stashdock.app/guide#install-dsh'}, githubUrl:'https://github.com/StashDock/StashDock'}, openLink:async()=>{}
+    })));
+  `, resolveDir: process.cwd(), loader:'tsx' }, bundle:true, write:false, format:'esm', platform:'node', packages:'external', jsx:'automatic', loader:{'.module.css':'empty','.css':'empty','.svg':'text','.png':'dataurl'} });
+  const path = join(process.cwd(), 'node_modules', `.stashdock-ai-guide-${process.pid}.mjs`);
+  try {
+    writeFileSync(path, result.outputFiles[0].text);
+    const { pages } = await import(pathToFileURL(path).href);
+    for (const [index, html] of pages.entries()) {
+      const name = index === 0 ? 'ChatGPT' : 'DeepSeek Harness';
+      assert.ok(html.includes(`Paste it into ${name} and ask it to install the StashDock plugin for ${name}.`));
+      assert.ok(html.includes(`After installation, fully quit and reopen ${name}.`));
+      assert.match(html, /aria-label="Copy GitHub link"/);
+      assert.equal((html.match(/<li>/g) || []).length, 4);
+      assert.doesNotMatch(html, /Open installation page|In a terminal|package\.tgz/);
+    }
+  } finally { rmSync(path, {force:true}); }
 });
 
 test('an actual extension setup handshake registers against the provider library without accepting website callers', async t => {

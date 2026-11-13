@@ -37,6 +37,7 @@
     "firefox": null,
     "safari": null,
     "codex": "https://stashdock.app/guide#install-plugin",
+    "dsh": null,
     "claude": null,
     "desktop": "https://stashdock.app/guide#install-desktop"
   },
@@ -72,6 +73,12 @@
         "com.openai.codex",
         "com.openai.chat"
       ]
+    },
+    "dsh": {
+      "protocols": ["dsh"],
+      "launchUrl": "dsh://open",
+      "website": "https://deepseek.com/harness",
+      "bundleIdentifiers": ["com.deepseek.dsh"]
     },
     "claude": {
       "protocols": [

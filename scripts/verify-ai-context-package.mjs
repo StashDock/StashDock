@@ -1,6 +1,6 @@
 // Actual bundled server + SDK, isolated SQLite, no mutations in the real library.
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -29,10 +29,10 @@ try {
   const saved = await call('save_stashdock_reference', payload);
   assert.equal(saved.isError, undefined); assert.equal(saved.structuredContent.created, true);
   const id = saved.structuredContent.item.id;
-  assert.equal(saved.structuredContent.item.mimeType, 'text/plain');
+  assert.equal(saved.structuredContent.item.mimeType, undefined);
+  assert.equal(saved.structuredContent.item.hasFile, false);
   const immediateOriginal = await call('get_stashdock_file', { id });
-  assert.equal(immediateOriginal.isError, undefined);
-  assert.equal(readFileSync(immediateOriginal.structuredContent.path, 'utf8'), payload.content);
+  assert.equal(immediateOriginal.isError, true);
   assert.equal((await observer.read())[0].id, id);
   const groups = (await call('list_stashdock_tags')).structuredContent;
   assert.deepEqual(groups.tags, [{ name: 'Design', count: 1 }]);
@@ -48,15 +48,11 @@ try {
   const retry = await connection.client.callTool({ name: 'save_stashdock_reference', arguments: payload });
   assert.equal(retry.structuredContent.created, false); assert.equal(retry.structuredContent.item.id, id);
   assert.equal((await observer.read()).length, 1);
-  const noteFile = (await call('get_stashdock_file', { id })).structuredContent;
   await call('edit_stashdock_context', { id, context: 'Additional context stays separate.' });
-  assert.equal(readFileSync(noteFile.path, 'utf8'), payload.content);
-  writeFileSync(noteFile.path + '.editor-save', 'Latest original saved independently.\n原文更新', { flag: 'wx' });
-  renameSync(noteFile.path + '.editor-save', noteFile.path);
   const latest = await call('get_stashdock_context', { id });
-  assert.equal(latest._meta.item.content, 'Latest original saved independently.\n原文更新');
+  assert.equal(latest._meta.item.content, payload.content);
   assert.equal(latest._meta.item.contextOverride, 'Additional context stays separate.');
-  assert.equal((await call('get_stashdock_file', { id })).structuredContent.path, noteFile.path);
+  assert.equal((await call('get_stashdock_file', { id })).isError, true);
   const skill = readFileSync(join(packageRoot, 'skills/use-stashdock/SKILL.md'), 'utf8');
   assert.match(skill, /save_stashdock_reference/); assert.match(skill, /apply_stashdock_tag_changes/);
   const bytes = Buffer.from('Region,Revenue\nNorth,137\nSouth,249\n');
@@ -67,9 +63,16 @@ try {
   const preparedFile = await call('prepare_stashdock_attachment', { ids: [file.id] });
   assert.match(preparedFile._meta.attachment.content[0].resource.text, /get_stashdock_file/);
   assert.match(preparedFile._meta.attachment.content[0].resource.text, /Compare both regions/);
+  assert.equal((await call('set_stashdock_sort', { sort: 'most-used' })).isError, undefined);
+  assert.equal(observer.getSort(), 'most-used');
+  assert.equal((await call('list_stashdock_shelf'))._meta.items.find(item => item.id === id).useCount, 0);
+  for (let attempt = 0; attempt < 2; attempt++) assert.equal((await call('record_stashdock_use', { ids: [id, id], operationId: 'accepted-test-draft' })).isError, undefined);
+  const ordered = await call('list_stashdock_shelf', { limit: 1 });
+  assert.equal(ordered._meta.sort, 'most-used');
+  assert.equal(ordered._meta.items[0].id, id); assert.equal(ordered._meta.items[0].useCount, 1);
   const entrypoints = (await connection.client.listTools()).tools.find(tool => tool.name === 'open_stashdock')._meta['openai/ui'].entrypoints;
   assert.deepEqual(entrypoints, [{ type: 'global' }, { type: 'thread' }]);
-  console.log(JSON.stringify({ packageRoot, tagSearchReadSave: true, approvedTagOrganization: true, durableRetryAfterServerRestart: true, sharedLibraryVisible: true, provenanceInContext: true, originalFileBytesPreserved: true, canonicalNoteOriginal: true, manualEntrypoints: true, realLibraryWrites: 0 }));
+  console.log(JSON.stringify({ packageRoot, tagSearchReadSave: true, approvedTagOrganization: true, durableRetryAfterServerRestart: true, sharedLibraryVisible: true, sharedSortAndDeduplicatedUsage: true, provenanceInContext: true, originalFileBytesPreserved: true, textNativeNote: true, manualEntrypoints: true, realLibraryWrites: 0 }));
 } finally {
   await connection?.close(); observer.close();
   assert.ok(dataDir.startsWith(join(tmpdir(), 'stashdock-mcp-test-ai-package-')));

@@ -44,7 +44,7 @@ export function startCaptureBridge(library, port = 17864, { openApp = openIntegr
         if (!request.headers['content-type']?.startsWith('application/json')) throw Error('Use a JSON request.');
         let body = ''; for await (const chunk of request) { body += chunk; if (Buffer.byteLength(body) > 1024) throw Error('Invalid application request.'); }
         const input = JSON.parse(body);
-        if (!input || Object.keys(input).join(',') !== 'id' || !['chrome','edge','firefox','codex','claude','desktop'].includes(input.id)) throw Error('Choose a supported StashDock app.');
+        if (!input || Object.keys(input).join(',') !== 'id' || !['chrome','edge','firefox','codex','dsh','claude','desktop'].includes(input.id)) throw Error('Choose a supported StashDock app.');
         result = await openApp(input.id, { desktopPath: library.desktopExecutable?.() });
       }
       else if (['GET','POST'].includes(request.method) && request.url === '/v1/tags') result = { tags: library.captureTags() };

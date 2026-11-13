@@ -3,9 +3,11 @@ import { isTauri, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { deleteItem, getItems, loadItems, saveItems, setItemFavorite } from "../../lib/storage";
 import { createLibraryStore, type ImportSummary } from "./store";
+import type { ReferenceSort } from '../../lib/reference-sort.mjs';
 
 export const libraryStore = createLibraryStore({
   load: loadItems,
+  ...(isTauri() ? { loadSort: () => invoke<ReferenceSort>('get_library_sort'), saveSort: (sort: ReferenceSort) => invoke<void>('set_library_sort', { sort }) } : {}),
   ...(isTauri() ? { loadSome: (ids: string[]) => getItems(ids) } : {}),
   add: async (items, next) => {
     await saveItems(isTauri() ? items : next);
@@ -51,11 +53,11 @@ function connect() {
         flush ??= window.setTimeout(() => { const ids = [...changed]; changed = new Set(); flush = undefined; if (!cancelled) void libraryStore.patch(ids); }, 120);
       };
       stops.push(() => { if (flush !== undefined) window.clearTimeout(flush); });
-      for (const name of ["extension-imported", "extension-deleted", "reference-preview-updated"]) {
+      for (const name of ["extension-imported", "extension-deleted", "reference-preview-updated", "reference-usage-updated"]) {
         void listen<unknown>(name, event => {
           if (cancelled) return;
           const ids = (event.payload as { ids?: unknown } | null)?.ids;
-          if (name === "reference-preview-updated" && Array.isArray(ids) && ids.every(id => typeof id === "string")) patch(ids);
+          if ((name === "reference-preview-updated" || name === "reference-usage-updated") && Array.isArray(ids) && ids.every(id => typeof id === "string")) patch(ids);
           else refresh();
           if (name === "extension-imported") libraryStore.announceImport(event.payload as ImportSummary);
         }).then(stop => {
@@ -79,5 +81,5 @@ function connect() {
 export function useLibrary() {
   const snapshot = useSyncExternalStore(libraryStore.subscribe, libraryStore.getSnapshot);
   useEffect(connect, []);
-  return { ...snapshot, refresh: libraryStore.refresh };
+  return { ...snapshot, refresh: libraryStore.refresh, setSort: libraryStore.setSort };
 }

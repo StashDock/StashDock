@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { App } from '@modelcontextprotocol/ext-apps';
 import plugin from '../../../plugins/stashdock/.codex-plugin/plugin.json';
-import { Check, Plus, RefreshCw, Settings } from 'lucide-react';
+import { Check, Plus, Settings } from 'lucide-react';
+import { ReferenceSortMenu } from '../../components/ReferenceSortMenu';
+import { normalizeReferenceSort, type ReferenceSort } from '../../lib/reference-sort.mjs';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { motionTokens } from '../../components/arc/lib/motion-tokens';
 import { Button } from '../../components/arc/button/button';
@@ -28,7 +30,7 @@ import { CardActionLabel } from '../../components/CardActionLabel';
 import { SelectAllReferences } from '../../components/SelectAllReferences';
 import { ReferenceViewToggle } from '../../components/ReferenceViewToggle';
 import type { StashItem } from '../../types';
-import { addAttachmentToDraft, parseAttachment, supportsDraft, DRAFT_REOPEN_HINT, DRAFT_UNAVAILABLE } from './draft';
+import { addAttachmentToDraft, parseAttachment, supportsDraft, supportsNativeFiles, DRAFT_REOPEN_HINT, DRAFT_UNAVAILABLE } from './draft';
 import card from '../../components/StashCard.module.css';
 import listStyles from '../../components/ReferenceList.module.css';
 import type { ChosenFile, ChosenFileDraft, FileReferencePayload } from '../../lib/fileReference';
@@ -62,6 +64,7 @@ export function McpShelf() {
   const reduce = useReducedMotion();
   const searchRef = useRef<HTMLInputElement>(null);
   const appRef = useRef<App | null>(null);
+  const refreshCurrent = useRef<() => void>(() => {});
   const importServices = useMemo(() => mcpLinkImport(() => appRef.current), []);
   const sequence = useRef(0);
   const readFlights = useRef(0);
@@ -90,6 +93,9 @@ export function McpShelf() {
     return previous.filter === filter && previous.activeTag === activeTag ? previous : { filter, activeTag };
   });
   const [view, setView] = useState<'grid' | 'list'>('grid');
+  const [sort, setSort] = useState<ReferenceSort>('newest');
+  const [sortRevision, setSortRevision] = useState(0);
+  const sortRef = useRef<ReferenceSort>('newest');
   const [tags, setTags] = useState<ShelfTag[]>([]);
   const importDialog = useRef<ReferenceImportHandle>(null);
   const [tagOperation, setTagOperation] = useState<TagOperation | null>(null);
@@ -140,15 +146,16 @@ export function McpShelf() {
     setRefreshing(true);
     setLoadingMore(offset > 0);
     try {
-      let result = await app.callServerTool({ name: 'list_stashdock_shelf', arguments: { query: text, collection, tag: activeTag, limit: 30, offset } }, { timeout: 10_000 });
+      let result = await app.callServerTool({ name: 'list_stashdock_shelf', arguments: { query: text, collection, tag: activeTag, limit: 30, offset, ...(offset ? { sort: sortRef.current } : {}) } }, { timeout: 10_000 });
       if (!alive.current || request !== sequence.current) return;
       if (result.isError) throw new Error(result.content.find(block => block.type === 'text')?.text || 'References could not be refreshed. Retry the connection.');
       const rows = readRows(result._meta?.items);
+      const order = normalizeReferenceSort(result._meta?.sort);
       const tagRows = result._meta?.tags;
       if (preservePages && offset === 0 && loadedCount.current > 30) {
         const current = () => alive.current && appRef.current === app && request === sequence.current;
         const extra = await readPreviewPages(loadedCount.current - 30, async page => {
-          result = await app.callServerTool({ name: 'list_stashdock_shelf', arguments: { query: text, collection, tag: activeTag, limit: 30, offset: page + 30 } }, { timeout: 10_000 });
+          result = await app.callServerTool({ name: 'list_stashdock_shelf', arguments: { query: text, collection, tag: activeTag, limit: 30, offset: page + 30, sort: order } }, { timeout: 10_000 });
           if (result.isError) throw new Error('References could not be refreshed. Retry.');
           return readRows(result._meta?.items);
         }, current);
@@ -157,6 +164,7 @@ export function McpShelf() {
       }
       if (Array.isArray(tagRows)) setTags(tagRows.filter((tag): tag is ShelfTag => Boolean(tag && typeof tag === 'object' && typeof (tag as ShelfTag).name === 'string' && typeof (tag as ShelfTag).count === 'number')));
       setItems(previous => reconcileReferences(previous, rows, offset ? 'append' : 'replace'));
+      sortRef.current = order; setSort(order);
       setHasMore(result.structuredContent?.hasMore === true);
       setReadError('');
       setReady(true);
@@ -210,7 +218,7 @@ export function McpShelf() {
     const app = appRef.current;
     const timer = setTimeout(() => { void load(app, query, filter); }, 140);
     return () => { clearTimeout(timer); ++sequence.current; };
-  }, [connected, query, filter, activeTag]);
+  }, [connected, query, filter, activeTag, sortRevision]);
   useEffect(() => {
     if (!connected || settingsOpen || mutationBusy || deleting || editing || contentEditing || tagOperation || !items.some(item => item.contentStatus === 'queued' || item.contentStatus === 'working' || item.previewStatus === 'queued' || item.previewStatus === 'working' || (['web', 'repo'].includes(item.kind) && !item.origin?.faviconUrl?.startsWith('data:image/') && !faviconPolling.current.given.has(item.id)))) return;
     let disposed = false, running = false;
@@ -227,7 +235,7 @@ export function McpShelf() {
         // Refresh every loaded page without collapsing pagination or changing selection.
         const current = () => !disposed && !importDialog.current?.isOpen() && alive.current && appRef.current === app && request === sequence.current;
         const rows = await readPreviewPages(items.length, async offset => {
-          const result = await app.callServerTool({ name: 'list_stashdock_shelf', arguments: { query, collection: filter, tag: activeTag, limit: 30, offset } }, { timeout: 10_000 });
+          const result = await app.callServerTool({ name: 'list_stashdock_shelf', arguments: { query, collection: filter, tag: activeTag, limit: 30, offset, sort: sortRef.current } }, { timeout: 10_000 });
           if (result.isError) throw new Error('Preview refresh failed');
           return readRows(result._meta?.items);
         }, current);
@@ -250,6 +258,7 @@ export function McpShelf() {
   }, [settingsOpen, tagOperation, deleting, editing, contentEditing]);
 
   const refresh = () => { if (appRef.current && connected) void load(appRef.current, query, filter, 0, true); };
+  refreshCurrent.current = refresh;
   useEffect(() => {
     if (!connected) return;
     // Entering the iframe can focus the window on the same press as Load more.
@@ -278,6 +287,13 @@ export function McpShelf() {
       setItems(rows => rows.map(row => row.id === item.id ? { ...row, favorite: !item.favorite } : row)); refresh();
     } catch (error) { setManagementError(message(error)); }
     finally { if (alive.current) setFavoritePending(null); }
+  }
+  async function changeSort(sort: ReferenceSort) {
+    ++sequence.current;
+    try {
+      await mutate('set_stashdock_sort', { sort });
+      if (alive.current) setSortRevision(value => value + 1);
+    } catch (error) { if (alive.current) { setManagementError(message(error)); setRefreshing(false); } }
   }
   async function openContent(item: StashItem) {
     const app = appRef.current;
@@ -336,18 +352,20 @@ export function McpShelf() {
     if (!remaining.length) return;
     flight.current = true; setPending(remaining); setAcknowledged([]); setAddError('');
     const successful: string[] = [];
+    const operationId = crypto.randomUUID();
     try {
       // Keep snapshots bounded without limiting how many displayed cards can be selected.
       for (let offset = 0; offset < remaining.length; offset += 30) {
       const batch = remaining.slice(offset, offset + 30);
-      const result = await app.callServerTool({ name: 'prepare_stashdock_attachment', arguments: { ids: batch } }, { timeout: 10_000 });
+      const result = await app.callServerTool({ name: 'prepare_stashdock_attachment', arguments: { ids: batch,
+        ...(supportsNativeFiles(app) && { fileDelivery: 'native' }) } }, { timeout: 10_000 });
       if (result.isError) throw new Error(result.content.find(block => block.type === 'text')?.text || 'The reference could not be prepared. Refresh and retry.');
       if (!alive.current || appRef.current !== app) return;
       const attachment = parseAttachment(result._meta?.attachment);
       if (attachment.ids.length !== batch.length || attachment.ids.some(id => !batch.includes(id))) throw new Error('The prepared selection does not match. Refresh and retry.');
       await addAttachmentToDraft(app, attachment);
-      if (!alive.current || appRef.current !== app) return;
       successful.push(...batch);
+      if (!alive.current || appRef.current !== app) return;
       setAcknowledged([...successful]);
       }
     } catch (error) {
@@ -355,11 +373,19 @@ export function McpShelf() {
     } finally {
       flight.current = false;
       if (alive.current && appRef.current === app) setPending([]);
+      if (successful.length) {
+        // One acknowledgment per user action, including any successful batches
+        // before a later failure. Bookkeeping never retries draft delivery.
+        void app.callServerTool({ name: 'record_stashdock_use', arguments: { ids: successful, operationId } }, { timeout: 10_000 }).then(result => {
+          if (result.isError) throw new Error('Reference usage could not be recorded.');
+          if (alive.current && appRef.current === app && sortRef.current === 'most-used') refreshCurrent.current();
+        }).catch(console.warn);
+      }
     }
   };
 
   return <main data-arc-ui className={styles.root}>
-    {settingsOpen && <McpSettingsView onLibraryMoved={refresh} onClose={() => { setSettingsOpen(false); refresh(); requestAnimationFrame(() => settingsTrigger.current?.focus()); }} onOpenLink={async url => { await appRef.current?.openLink({ url }); }} />}
+    {settingsOpen && <McpSettingsView dsh={appRef.current?.getHostVersion()?.name === 'DeepSeek Harness'} onLibraryMoved={refresh} onClose={() => { setSettingsOpen(false); refresh(); requestAnimationFrame(() => settingsTrigger.current?.focus()); }} onOpenLink={async url => { await appRef.current?.openLink({ url }); }} />}
     <h1 className={styles.srOnly} hidden={settingsOpen}>{t('StashDock references')}</h1>
     <header className={header.header} hidden={settingsOpen}>
       <div className={header.top}><BrandIcon className={styles.brand} /><Button ref={settingsTrigger} variant="ghost" size="sm" aria-label={t('Settings')} disabled={!connected || mutationBusy || pending.length > 0} onClick={() => { ++editorSequence.current; setSettingsOpen(true); }}><Settings size={16} strokeWidth={1.75} aria-hidden="true" /></Button><Button variant="secondary" size="sm" aria-haspopup="dialog" disabled={!connected || mutationBusy} onClick={() => importDialog.current?.open()}><Plus size={16} strokeWidth={1.75} aria-hidden="true" />{t('Import references')}</Button></div>
@@ -367,7 +393,7 @@ export function McpShelf() {
       <div className={`${header.filters} ${styles.filters}`}>
         <div className={header.filterOptions}><SegmentedControl label={t('Collection')} options={shelfFilters.map(option => ({ ...option, label: t(option.label) }))} value={filter} onValueChange={value => { setFilter(value); setActiveTag(''); }} /></div>
       <div className={styles.tagToolbar}><TagFilter tags={tags} activeTag={activeTag} disabled={!connected} busy={mutationBusy} triggerRef={tagFocus} onFilter={setActiveTag} onEdit={setTagOperation} /></div>
-        <Button type="button" variant="ghost" size="sm" aria-label={t('Refresh library')} loading={refreshing} disabled={!connected} onClick={refresh}><RefreshCw size={16} strokeWidth={1.75} aria-hidden="true" /></Button>
+        <ReferenceSortMenu value={sort} onChange={value => void changeSort(value)} disabled={!connected || mutationBusy || refreshing}/>
       </div>
     </header>
     <ScrollArea hidden={settingsOpen} label={t('References')} className={styles.scroller} viewportClassName={`${styles.content} ${selected.length ? styles.contentWithSelection : ''}`} fade={0} aria-busy={!ready || refreshing}>

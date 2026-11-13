@@ -122,7 +122,13 @@ pub(crate) fn target_with(
     if let Some(schemes) = app["protocols"].as_array() {
         for scheme in schemes.iter().filter_map(Value::as_str) {
             if protocol(scheme) {
-                return Ok((format!("{scheme}://"), website));
+                return Ok((
+                    app["launchUrl"]
+                        .as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| format!("{scheme}://")),
+                    website,
+                ));
             }
         }
     }
@@ -256,6 +262,18 @@ mod tests {
     #[test]
     fn native_targets_prefer_registered_clients_and_use_official_fallbacks() {
         let config = configuration();
+        assert_eq!(
+            target_with(&config, "dsh", None, |scheme| scheme == "dsh", None)
+                .unwrap()
+                .0,
+            "dsh://open"
+        );
+        assert_eq!(
+            target_with(&config, "dsh", None, |_| false, None)
+                .unwrap()
+                .0,
+            "https://deepseek.com/harness"
+        );
         assert_eq!(
             target_with(&config, "codex", None, |scheme| scheme == "codex", None)
                 .unwrap()

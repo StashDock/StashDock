@@ -64,7 +64,7 @@ export default function LibraryView({ onCollapse, active = true, maximized = fal
     setTagOperation({ name, action });
   }, []);
   useEffect(() => { if (!active) { setEditing(null); setContentEditing(null); setTagOperation(null); } }, [active]);
-  const { storageReady, error, refresh, refreshing, searching, shownKey, shownQuery, shownFilter, shownTag, filter, setFilter, activeTag, setActiveTag, query, setQuery, selectedItems, selectedSet, setSelectedIds, view, setView, importDialog, copied, copiedItemId, notice, setNotice, searchRef, counts, tags, visibleItems, toggleSelection, toggleFavorite, handleDelete, handleDeleteSelected, pendingDelete, setPendingDelete, deleting, deleteError, confirmDelete, handleOpenItem, addItems, replaceLink, handleCopy, handleCopyItem } = useLibraryController(active, true, Boolean(editing || contentEditing || tagOperation || settingsOpen));
+  const { sort, setSort, storageReady, error, refresh, refreshing, searching, shownKey, shownQuery, shownFilter, shownTag, filter, setFilter, activeTag, setActiveTag, query, setQuery, selectedItems, selectedSet, setSelectedIds, view, setView, importDialog, copied, copiedItemId, notice, setNotice, searchRef, counts, tags, visibleItems, toggleSelection, toggleFavorite, handleDelete, handleDeleteSelected, pendingDelete, setPendingDelete, deleting, deleteError, confirmDelete, handleOpenItem, addItems, replaceLink, handleCopy, handleCopyItem } = useLibraryController(active, true, Boolean(editing || contentEditing || tagOperation || settingsOpen));
   // The folder search opens the library on the same search.
   useEffect(() => {
     if (!isTauri()) return;
@@ -119,8 +119,9 @@ export default function LibraryView({ onCollapse, active = true, maximized = fal
             compactBrand={nativeChrome ? <BrandIcon className={styles.compactBrand} /> : undefined}
             query={query}
             searching={searching}
+            sort={sort}
+            onSortChange={setSort}
             refreshing={refreshing}
-            onRefresh={() => void refresh()}
             view={view}
             searchRef={searchRef}
             onQueryChange={setQuery}

@@ -8,7 +8,7 @@ use super::*;
 use std::time::UNIX_EPOCH;
 
 /// Same limit as chosen files; a larger original is used in place, not copied.
-const MAX_ORIGINAL_BYTES: u64 = 30 * 1024 * 1024;
+const MAX_ORIGINAL_BYTES: u64 = 512 * 1024 * 1024;
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct Resolved {
@@ -113,7 +113,7 @@ pub(super) fn synchronize(
         Option<String>,
     ) = connection
         .query_row(
-            "SELECT asset_path, original_path, origin_json, mime_type FROM stash_items WHERE id=?1",
+            "SELECT asset_path, original_path, origin_json, mime_type FROM stash_items WHERE id=?1 AND kind<>'note'",
             [id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )

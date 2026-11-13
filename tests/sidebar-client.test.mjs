@@ -15,6 +15,29 @@ test('a reset or lost port recovers while the same sidebar stays open',async()=>
   try{await f.client.capture();f.ports[0].onMessage.emit({reset:true});await delay(240);assert.ok(f.ports.length>=2);assert.ok(refreshes>=1);assert.equal((await f.client.capture()).content,'First body');}
   finally{unsubscribe();f.client.dispose();}
 });
+
+test('parallel reads share one recovery and a delayed reconnect never replaces the healthy port',async()=>{
+  const f=fixture();const previous=f.api.runtime.sendMessage;const failures=[];
+  f.api.runtime.sendMessage=message=>{
+    if(failures.length<3)return new Promise((_resolve,reject)=>{
+      failures.push(reject);
+      if(failures.length===3)queueMicrotask(()=>{
+        f.ports[0].disconnect();
+        failures.forEach(fail=>fail(Error('The sidebar connection changed.')));
+      });
+    });
+    if(message.type==='provider-status')return Promise.resolve({connected:true});
+    if(message.type==='read-tags')return Promise.resolve({tags:[]});
+    return previous(message);
+  };
+  try{
+    const [page,status,tags]=await Promise.all([f.client.capture(),f.client.providerStatus(),f.client.tags()]);
+    assert.equal(page.content,'First body');assert.equal(status.connected,true);assert.deepEqual(tags,[]);
+    await delay(240);
+    assert.equal(f.ports.length,2,'Only one replacement connection should be opened');
+    assert.equal((await f.client.capture()).content,'First body');
+  }finally{f.client.dispose();}
+});
 test('health reconciliation detects a missed navigation event, then stops after disposal',async()=>{
   const f=fixture();let refreshes=0;const unsubscribe=f.client.subscribe(()=>{refreshes++;},()=>{},()=>{});
   try{await f.client.capture();f.entry={...f.entry,token:'b',expected:{tabId:2,url:'https://two.example'},page:{content:'New body'}};await delay(45);assert.ok(refreshes>0);f.client.dispose();const n=f.calls.length;await delay(45);assert.equal(f.calls.length,n);}

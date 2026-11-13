@@ -24,7 +24,7 @@ export function isFileReference(item: Pick<StashItem, 'kind'>) { return ['file',
 export async function stageFileContent(file: File) {
   if (file.size > FILE_REFERENCE_LIMIT) throw Error('Choose a file under 5 MB.');
   return file.type.startsWith('text/') || /\.(txt|md|mdx|csv|log|json|html|css|js|jsx|ts|tsx|py|rs|yaml|yml|toml|xml|sql)$/i.test(file.name)
-    ? (await file.text()).slice(0, 50_000) : '';
+    ? Array.from(await file.text()).slice(0, 50_000).join('') : '';
 }
 export async function fileReferencePayload(file: File, title: string, content: string): Promise<FileReferencePayload> {
   if (file.size > FILE_REFERENCE_LIMIT) throw Error('Choose a file under 5 MB.');

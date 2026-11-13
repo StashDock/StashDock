@@ -1,101 +1,116 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, readdirSync, renameSync, realpathSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, readdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, extname } from 'node:path';
-import { EventEmitter } from 'node:events';
+import { join } from 'node:path';
 import { DatabaseSync, constants } from 'node:sqlite';
-import { synchronizeNoteFiles } from '../plugins/stashdock/server/note-files.mjs';
+import { migrateNoteFiles } from '../plugins/stashdock/server/note-files.mjs';
 import { createLocalLibrary } from '../plugins/stashdock/server/local-library.mjs';
-import { openManagedFile } from '../plugins/stashdock/server/open-file.mjs';
+import { prepareAttachment } from '../plugins/stashdock/server/library.mjs';
 
-test('unchanged note checks work when SQLite forbids reading cached bodies and covers', () => {
-  const root = mkdtempSync(join(tmpdir(), 'stashdock-note-metadata-'));
-  const library = createLocalLibrary({ dataDir: root });
-  library.saveContextReference({ title: 'Large unchanged note', content: 'Keep this original.\n'.repeat(10000) });
-  const reader = new DatabaseSync(join(root, 'stashdock.sqlite3'));
-  try {
-    reader.setAuthorizer((action, table, column) => action === constants.SQLITE_READ && table === 'stash_items' &&
-      ['content', 'excerpt', 'preview', 'context_override'].includes(column) ? constants.SQLITE_DENY : constants.SQLITE_OK);
-    assert.doesNotThrow(() => synchronizeNoteFiles(reader, join(root, 'assets')));
-    assert.throws(() => reader.prepare('SELECT content FROM stash_items').all(), /prohibited|authorized/);
-  } finally { reader.close(); library.close(); rmSync(root, { recursive: true, force: true }); }
-});
-
-test('unchanged note refresh is read-only even while another provider holds a write transaction', async t => {
+test('modern note checks read metadata only and do not reserve a writer', async t => {
   const root = mkdtempSync(join(tmpdir(), 'stashdock-note-idle-'));
   const library = createLocalLibrary({ dataDir: root });
-  const note = library.saveContextReference({ title: 'Normal text file', content: 'Original' }).item;
+  const note = library.saveContextReference({ title: 'Normal context', content: 'Original' }).item;
   const writer = new DatabaseSync(join(root, 'stashdock.sqlite3'));
-  try {
-    writer.exec('BEGIN IMMEDIATE');
-    try { assert.equal((await library.read())[0].assetPath, note.assetPath); }
-    finally { writer.exec('ROLLBACK'); }
-    writeFileSync(note.assetPath, 'Updated after lock release');
-    assert.equal((await library.read())[0].content, 'Updated after lock release');
-  } finally { writer.close(); library.close(); rmSync(root, { recursive: true, force: true }); }
+  t.after(() => { writer.close(); library.close(); rmSync(root, { recursive: true, force: true }); });
+  writer.setAuthorizer((action, table, column) => action === constants.SQLITE_READ && table === 'stash_items' &&
+    ['content', 'excerpt', 'preview', 'context_override'].includes(column) ? constants.SQLITE_DENY : constants.SQLITE_OK);
+  assert.doesNotThrow(() => migrateNoteFiles(writer, join(root, 'assets')));
+  writer.setAuthorizer(null);
+  writer.exec('BEGIN IMMEDIATE');
+  try { assert.equal((await library.read())[0].content, note.content); }
+  finally { writer.exec('ROLLBACK'); }
 });
 
-test('Note has one real txt asset shared by providers, external edits and reopening, with context kept separate', async t => {
-  const root = mkdtempSync(join(tmpdir(), 'stashdock-canonical-note-test-'));
+test('notes store full text, share edits across providers and create no file', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'stashdock-context-note-'));
   const first = createLocalLibrary({ dataDir: root }), second = createLocalLibrary({ dataDir: root });
   t.after(() => { first.close(); second.close(); rmSync(root, { recursive: true, force: true }); });
   const body = '完整原文\n'.repeat(6000);
   const note = first.saveContextReference({ title: 'Common rules', content: body, tags: ['Rules'] }).item;
-  assert.equal(extname(note.assetPath), '.txt');
-  assert.equal(readFileSync(note.assetPath, 'utf8'), note.content);
-  const external = 'Edited in a normal text editor\n原文更新\n';
-  writeFileSync(note.assetPath + '.editor-save', external);
-  renameSync(note.assetPath + '.editor-save', note.assetPath);
-  let loaded = (await second.read()).find(row => row.id === note.id);
-  assert.equal(loaded.content, external); assert.equal(loaded.contextOverride, undefined);
-  assert.equal(loaded.assetPath, note.assetPath);
-  assert.equal(second.resolveFile(note.id).path, first.resolveFile(note.id).path);
+  assert.equal(note.assetPath, undefined); assert.equal(note.hasFile, false);
+  assert.equal(prepareAttachment([note], [note.id]).content[0].resource.text.includes(body), true);
+  assert.deepEqual(readdirSync(join(root, 'assets')), []);
+  assert.throws(() => first.resolveFile(note.id), /unavailable|not a file|saved as text/i);
   first.editContext(note.id, 'Updated from the card');
-  assert.equal(readFileSync(note.assetPath, 'utf8'), external);
-  assert.equal((await second.read()).find(row => row.id === note.id).content, external);
-  assert.equal((await second.read()).find(row => row.id === note.id).contextOverride, 'Updated from the card');
-  first.editMetadata(note.id, 'Renamed card', ['Rules']);
-  assert.equal(first.resolveFile(note.id).path, second.resolveFile(note.id).path);
-  const filesBefore = readdirSync(join(root, 'assets'));
-  let launches = 0;
-  const launch = (command, args, options) => {
-    launches++; assert.equal(command, 'explorer.exe'); assert.equal(args[0], first.resolveFile(note.id).path);
-    assert.equal(options.shell, false);
-    const child = new EventEmitter(); child.unref = () => {}; queueMicrotask(() => child.emit('spawn')); return child;
-  };
-  await openManagedFile(note.assetPath, join(root, 'assets'), { launch, platform: 'win32' });
-  await openManagedFile(note.assetPath, join(root, 'assets'), { launch, platform: 'win32' });
-  assert.equal(launches, 2); assert.deepEqual(readdirSync(join(root, 'assets')), filesBefore);
-  first.editContext(note.id, ''); assert.equal(readFileSync(note.assetPath, 'utf8'), external);
-  rmSync(note.assetPath);
-  await first.read();
-  assert.throws(() => first.resolveFile(note.id), /unavailable/);
-  assert.equal(readdirSync(join(root, 'assets')).length, 0, 'Missing files must not be regenerated from a stale cache');
+  let loaded = (await second.read()).find(row => row.id === note.id);
+  assert.equal(loaded.content, body); assert.equal(loaded.contextOverride, 'Updated from the card');
+  assert.equal(prepareAttachment([loaded], [note.id]).content[0].resource.text, 'Updated from the card');
+  first.editContext(note.id, '');
+  loaded = (await second.read()).find(row => row.id === note.id);
+  assert.equal(prepareAttachment([loaded], [note.id]).content[0].resource.text, '');
 });
 
-test('legacy note migration preserves final text and identity and runs once, not on each open', async t => {
-  const root = mkdtempSync(join(tmpdir(), 'stashdock-legacy-note-test-'));
+test('legacy TXT migration retains latest text, identity, metadata, final context and recovery file', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'stashdock-legacy-note-'));
   let library = createLocalLibrary({ dataDir: root });
-  const item = library.importItems([{ title: 'Legacy note', kind: 'note', source: 'Note', content: 'Original body', tags: ['Keep'] }]).items[0];
-  library.close(); rmSync(item.assetPath);
+  const note = library.saveContextReference({ title: 'Legacy note', content: 'Cached body', tags: ['Keep'] }).item;
+  library.close();
+  const file = join(root, 'assets', 'Legacy.txt');
+  writeFileSync(file, '\ufeffLatest externally edited body 中文');
   const db = new DatabaseSync(join(root, 'stashdock.sqlite3'));
-  db.prepare("UPDATE stash_items SET asset_path=NULL,context_override='Final user edit',content='Old body',favorite=1 WHERE id=?").run(item.id);
+  db.prepare("UPDATE stash_items SET asset_path=?,mime_type='text/plain',size_bytes=1,context_override='Final user edit',favorite=1 WHERE id=?").run(file, note.id);
+  db.prepare('INSERT INTO reference_usage(id,use_count) VALUES(?,3)').run(note.id);
   db.close();
   library = createLocalLibrary({ dataDir: root });
   t.after(() => { library.close(); rmSync(root, { recursive: true, force: true }); });
-  const [migrated] = await library.read();
-  assert.equal(migrated.id, item.id); assert.equal(migrated.favorite, true); assert.deepEqual(migrated.tags, ['Keep']);
-  assert.equal(readFileSync(migrated.assetPath, 'utf8'), 'Old body');
+  let [migrated] = await library.read();
+  assert.equal(migrated.id, note.id); assert.equal(migrated.title, 'Legacy note');
+  assert.equal(migrated.favorite, true); assert.equal(migrated.useCount, 3); assert.deepEqual(migrated.tags, ['Keep']);
+  assert.equal(migrated.content, 'Latest externally edited body 中文');
   assert.equal(migrated.contextOverride, 'Final user edit');
-  const path = migrated.assetPath;
-  await library.read(); await library.read();
-  assert.equal(library.resolveFile(item.id).path, realpathSync(path));
-  assert.equal(readdirSync(join(root, 'assets')).length, 1);
-  const oldClient = new DatabaseSync(join(root, 'stashdock.sqlite3'));
-  oldClient.prepare('UPDATE stash_items SET context_override=? WHERE id=?').run('New additional context', item.id);
-  oldClient.close();
-  assert.equal(readFileSync(path, 'utf8'), 'Old body');
+  assert.equal(migrated.assetPath, undefined); assert.equal(migrated.hasFile, false);
+  assert.equal(readFileSync(file, 'utf8'), '\ufeffLatest externally edited body 中文');
+  writeFileSync(file, 'Recovery copy edited after migration');
+  [migrated] = await library.read();
+  assert.equal(migrated.content, 'Latest externally edited body 中文');
+  assert.equal(prepareAttachment([migrated], [note.id]).content[0].resource.text, 'Final user edit');
+  library.removeMany([note.id]);
+  assert.equal(readFileSync(file, 'utf8'), 'Recovery copy edited after migration');
+});
+
+test('an unavailable legacy TXT retains cached context and can migrate when its file returns', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'stashdock-note-missing-'));
+  const library = createLocalLibrary({ dataDir: root });
+  const note = library.saveContextReference({ title: 'Rules', content: 'Cached body' }).item;
+  const file = join(root, 'assets', 'Missing.txt');
+  const db = new DatabaseSync(join(root, 'stashdock.sqlite3'));
+  t.after(() => { db.close(); library.close(); rmSync(root, { recursive: true, force: true }); });
+  db.prepare("UPDATE stash_items SET asset_path=?,context_override='' WHERE id=?").run(file, note.id);
+  db.exec('BEGIN IMMEDIATE');
+  try { assert.equal(library.readItems([note.id])[0].content, 'Cached body'); }
+  finally { db.exec('ROLLBACK'); }
+  let [loaded] = await library.read();
+  assert.equal(loaded.content, 'Cached body'); assert.equal(loaded.contextOverride, '');
+  assert.equal(loaded.hasFile, false);
+  assert.equal(db.prepare('SELECT asset_path FROM stash_items WHERE id=?').get(note.id).asset_path, file);
+  writeFileSync(file, 'Recovered current body');
+  [loaded] = await library.read();
+  assert.equal(loaded.content, 'Recovered current body'); assert.equal(loaded.contextOverride, '');
+  assert.equal(db.prepare('SELECT asset_path FROM stash_items WHERE id=?').get(note.id).asset_path, null);
+});
+
+test('a failed upgrade batch rolls back and resumes without losing previous batches or TXT files', t => {
+  const root = mkdtempSync(join(tmpdir(), 'stashdock-note-batches-'));
+  const library = createLocalLibrary({ dataDir: root });
+  const db = new DatabaseSync(join(root, 'stashdock.sqlite3'));
+  t.after(() => { db.close(); library.close(); rmSync(root, { recursive: true, force: true }); });
+  const insert = db.prepare("INSERT INTO stash_items(id,title,kind,source,excerpt,tags_json,created_at,updated_at,asset_path,content) VALUES(?,?,'note','Note','','[]','now','now',?,'Cached body')");
+  for (let n = 0; n < 70; n++) {
+    const id = 'note-' + String(n).padStart(3, '0'), path = join(root, 'assets', id + '.txt');
+    writeFileSync(path, 'Latest ' + id);
+    insert.run(id, id, path);
+  }
+  db.exec("CREATE TRIGGER stop_note_batch BEFORE UPDATE ON stash_items WHEN NEW.id='note-066' AND NEW.asset_path IS NULL BEGIN SELECT RAISE(ABORT, 'stop migration batch'); END");
+  assert.throws(() => migrateNoteFiles(db, join(root, 'assets')), /stop migration batch/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM stash_items WHERE asset_path IS NULL').get().count, 64);
+  assert.equal(db.prepare("SELECT content FROM stash_items WHERE id='note-066'").get().content, 'Cached body');
+  db.exec('DROP TRIGGER stop_note_batch');
+  migrateNoteFiles(db, join(root, 'assets'));
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM stash_items WHERE asset_path IS NULL').get().count, 70);
+  assert.equal(db.prepare("SELECT content FROM stash_items WHERE id='note-066'").get().content, 'Latest note-066');
+  assert.equal(readdirSync(join(root, 'assets')).length, 70);
 });
 
 test('all imported formats reopen and transfer the same latest original, with supplemental content separate', async t => {

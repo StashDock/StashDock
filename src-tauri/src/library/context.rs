@@ -3,7 +3,7 @@ use super::StashItem;
 
 const HEADING: &str = "# StashDock context\n\n";
 
-fn section(item: &StashItem, originals_delivered: bool) -> String {
+fn section(item: &StashItem) -> String {
     let origin = item.origin.as_ref();
     let field = |name: &str| {
         origin
@@ -11,10 +11,11 @@ fn section(item: &StashItem, originals_delivered: bool) -> String {
             .and_then(|value| value.as_str())
             .filter(|value| !value.is_empty())
     };
-    let file = item
-        .asset_path
-        .as_ref()
-        .is_some_and(|path| !path.is_empty());
+    let file = item.kind != "note"
+        && item
+            .asset_path
+            .as_ref()
+            .is_some_and(|path| !path.is_empty());
     let mut lines = vec![format!("## {}", item.title)];
     let source = item.source.trim();
     let duplicate_host = item
@@ -80,20 +81,13 @@ fn section(item: &StashItem, originals_delivered: bool) -> String {
     if !item.tags.is_empty() {
         lines.push(format!("Tags: {}", item.tags.join(", ")));
     }
-    if originals_delivered && file && item.kind == "note" {
-        return lines.join("\n");
-    }
     let body = item
         .content
         .as_deref()
         .filter(|value| !value.is_empty())
         .unwrap_or(&item.excerpt);
     let label = if file {
-        if item.kind == "note" {
-            "Note text"
-        } else {
-            "Supplemental context"
-        }
+        "Supplemental context"
     } else if item.content.as_deref().is_none_or(str::is_empty) && !item.excerpt.is_empty() {
         "Summary"
     } else if field("captureMethod") == Some("selection") {
@@ -106,8 +100,12 @@ fn section(item: &StashItem, originals_delivered: bool) -> String {
         "Saved content"
     };
     let mut characters = body.chars();
-    let text = characters.by_ref().take(20_000).collect::<String>();
-    let truncated = characters.next().is_some();
+    let text = if item.kind == "note" {
+        body.to_owned()
+    } else {
+        characters.by_ref().take(20_000).collect::<String>()
+    };
+    let truncated = item.kind != "note" && characters.next().is_some();
     if !text.is_empty() {
         lines.extend([String::new(), format!("### {label}"), text]);
     }
@@ -135,7 +133,7 @@ fn section(item: &StashItem, originals_delivered: bool) -> String {
     lines.join("\n")
 }
 
-pub(super) fn build(items: &[StashItem], originals_delivered: bool) -> Result<String, String> {
+pub(super) fn build(items: &[StashItem]) -> Result<String, String> {
     if items.len() == 1 {
         if let Some(value) = &items[0].context_override {
             return Ok(value.clone());
@@ -145,7 +143,7 @@ pub(super) fn build(items: &[StashItem], originals_delivered: bool) -> Result<St
         .iter()
         .map(|item| match &item.context_override {
             Some(value) => value.strip_prefix(HEADING).unwrap_or(value).to_owned(),
-            None => section(item, originals_delivered),
+            None => section(item),
         })
         .collect::<Vec<_>>();
     let result = format!("{HEADING}{}", sections.join("\n\n---\n\n"));
@@ -155,9 +153,57 @@ pub(super) fn build(items: &[StashItem], originals_delivered: bool) -> Result<St
     Ok(result)
 }
 
+fn file_supplement(item: &StashItem) -> String {
+    if let Some(value) = &item.context_override {
+        // Legacy editors could save their unchanged generated preview. It is
+        // not an annotation; retain every other explicit final edit verbatim.
+        if *value != format!("{HEADING}{}", section(item)) {
+            return value.clone();
+        }
+    }
+    let edited = item.origin.as_ref().and_then(|v| v.get("contentEdited")).and_then(|v| v.as_bool());
+    let legacy_binary = edited.is_none()
+        && item.origin.as_ref().and_then(|v| v.get("importMethod")).and_then(|v| v.as_str()) == Some("local_file")
+        && item.mime_type.as_deref().is_some_and(|mime| !super::is_text_mime(mime));
+    if edited == Some(true) || legacy_binary {
+        item.content.clone().unwrap_or_default()
+    } else {
+        String::new()
+    }
+}
+
+/// Original files carry their own identity. Export only user annotations and
+/// any selected text references alongside them, never file extraction/summaries.
+pub(super) fn native(items: &[StashItem]) -> Result<String, String> {
+    let mut selected = Vec::new();
+    for item in items {
+        if item.kind == "note" || item.asset_path.as_deref().is_none_or(str::is_empty) {
+            selected.push(item.clone());
+            continue;
+        }
+        let supplement = file_supplement(item);
+        if supplement.trim().is_empty() { continue; }
+        let raw = item.origin.as_ref().and_then(|v| v.get("fileName")).and_then(|v| v.as_str())
+            .or(item.asset_path.as_deref()).unwrap_or(&item.title);
+        let name = raw.rsplit(['\\', '/']).next().filter(|v| !v.is_empty()).unwrap_or("File").replace(['\r', '\n'], " ");
+        let mut annotated = item.clone();
+        annotated.context_override = Some(format!("## {name}\n\n{supplement}"));
+        selected.push(annotated);
+    }
+    if selected.is_empty() { Ok(String::new()) } else { build(&selected) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn file_only_native_context_matches_javascript_contract() {
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!("../../../tests/fixtures/native-context-contract.json")).unwrap();
+        for fixture in fixtures.as_array().unwrap() {
+            let items: Vec<StashItem> = serde_json::from_value(fixture["items"].clone()).unwrap();
+            assert_eq!(native(&items).unwrap(), fixture["expected"].as_str().unwrap(), "{}", fixture["name"]);
+        }
+    }
     #[test]
     fn native_output_matches_shared_javascript_fixtures() {
         let fixtures: serde_json::Value = serde_json::from_str(include_str!(
@@ -167,11 +213,7 @@ mod tests {
         for fixture in fixtures.as_array().unwrap() {
             let items: Vec<StashItem> = serde_json::from_value(fixture["items"].clone()).unwrap();
             assert_eq!(
-                build(
-                    &items,
-                    fixture["originalFilesDelivered"].as_bool().unwrap_or(false)
-                )
-                .unwrap(),
+                build(&items).unwrap(),
                 fixture["expected"].as_str().unwrap(),
                 "{}",
                 fixture["name"]
@@ -181,15 +223,21 @@ mod tests {
     #[test]
     fn unicode_truncation_reports_both_limits_without_splitting_characters() {
         let mut item: StashItem = serde_json::from_value(serde_json::json!({"id":"long","title":"Long","kind":"web","source":"Chrome","excerpt":"","tags":[],"createdAt":"2026-10-18","content":"😀".repeat(20_001),"origin":{"truncated":true}})).unwrap();
-        let context = build(&[item.clone()], false).unwrap();
+        let context = build(&[item.clone()]).unwrap();
         assert_eq!(context.matches('😀').count(), 20_000);
         assert!(
             context.contains("saved source content is incomplete")
                 && context.contains("exported text was truncated")
         );
+        item.kind = "note".into();
+        item.origin = None;
+        assert_eq!(
+            build(&[item.clone()]).unwrap().matches('😀').count(),
+            20_001
+        );
         item.context_override = Some("😀".repeat(25_000));
         assert_eq!(
-            build(&[item.clone()], true).unwrap(),
+            build(&[item.clone()]).unwrap(),
             item.context_override.unwrap()
         );
     }

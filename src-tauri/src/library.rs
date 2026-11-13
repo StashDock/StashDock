@@ -13,6 +13,7 @@ mod note_files;
 mod originals;
 pub mod preview_protocol;
 mod search;
+pub(crate) mod usage;
 #[cfg(test)]
 use bridge::json_response;
 pub use bridge::start_extension_server;
@@ -67,6 +68,8 @@ pub struct StashItem {
     pub tags: Vec<String>,
     pub created_at: String,
     #[serde(default)]
+    pub use_count: u64,
+    #[serde(default)]
     pub favorite: bool,
     pub preview: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -104,7 +107,7 @@ impl LibraryState {
         legacy::remove_untouched_demo_references(&connection, &assets_dir)
             .map_err(std::io::Error::other)?;
         backfill_text_content(&connection).map_err(std::io::Error::other)?;
-        note_files::synchronize(&connection).map_err(std::io::Error::other)?;
+        note_files::migrate(&connection).map_err(std::io::Error::other)?;
         let executable = std::env::current_exe()?;
         crate::integrations::record(
             &connection,
@@ -304,25 +307,28 @@ fn replace_link_item(connection: &Connection, item: &StashItem) -> Result<(), St
 }
 
 fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<StashItem> {
+    let kind: String = row.get(2)?;
+    let file = kind != "note";
     let tags_json: String = row.get(6)?;
     let size_bytes: Option<i64> = row.get(13)?;
     let origin_json: Option<String> = row.get(15)?;
     Ok(StashItem {
         id: row.get(0)?,
         title: row.get(1)?,
-        kind: row.get(2)?,
+        kind,
         source: row.get(3)?,
         url: row.get(4)?,
         excerpt: row.get(5)?,
         tags: serde_json::from_str(&tags_json).unwrap_or_default(),
         created_at: row.get(7)?,
+        use_count: 0,
         favorite: row.get::<_, i64>(8)? != 0,
         preview: row.get(9)?,
         preview_status: None,
-        asset_path: row.get(10)?,
-        original_path: row.get(11)?,
-        mime_type: row.get(12)?,
-        size_bytes: size_bytes.map(|value| value.max(0) as u64),
+        asset_path: if file { row.get(10)? } else { None },
+        original_path: if file { row.get(11)? } else { None },
+        mime_type: if file { row.get(12)? } else { None },
+        size_bytes: size_bytes.filter(|_| file).map(|value| value.max(0) as u64),
         content: row.get(14)?,
         context_override: row.get(16)?,
         origin: origin_json.and_then(|value| serde_json::from_str(&value).ok()),
@@ -345,7 +351,7 @@ const SHELF_COLUMNS: &str = "id, title, kind, source, url, excerpt, tags_json,
     mime_type, size_bytes, NULL, origin_json, NULL";
 
 fn read_all(connection: &Connection, columns: &str) -> Result<Vec<StashItem>, String> {
-    note_files::synchronize(connection)?;
+    note_files::migrate(connection)?;
     let mut statement = connection
         .prepare(&format!(
             "SELECT {columns} FROM stash_items ORDER BY created_at DESC, rowid"
@@ -356,6 +362,7 @@ fn read_all(connection: &Connection, columns: &str) -> Result<Vec<StashItem>, St
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
+    usage::annotate(connection, &mut items)?;
     crate::web_preview::annotate(connection, &mut items).map_err(|error| error.to_string())?;
     Ok(items)
 }
@@ -369,7 +376,9 @@ fn read_items(connection: &Connection) -> Result<Vec<StashItem>, String> {
 
 /// The library as the shelf shows it: no bodies or edited context.
 fn read_shelf(connection: &Connection) -> Result<Vec<StashItem>, String> {
-    read_all(connection, SHELF_COLUMNS)
+    let mut items = read_all(connection, SHELF_COLUMNS)?;
+    usage::sort(connection, &mut items)?;
+    Ok(items)
 }
 
 /// The listed references that still exist, in the given order. `full` adds
@@ -384,7 +393,7 @@ fn read_by_id(
         return Err("Read at most 500 references at a time.".into());
     }
     if full {
-        note_files::synchronize(connection)?;
+        note_files::migrate(connection)?;
     }
     let columns = if full { ITEM_COLUMNS } else { SHELF_COLUMNS };
     let mut query = connection
@@ -411,6 +420,7 @@ fn read_by_id(
             items.push(item);
         }
     }
+    usage::annotate(connection, &mut items)?;
     crate::web_preview::annotate(connection, &mut items).map_err(|error| error.to_string())?;
     Ok(items)
 }
@@ -438,7 +448,7 @@ fn reference_drag_context(database: &Path, ids: &[String]) -> Result<String, Str
 
 #[cfg(test)]
 fn build_drag_context(connection: &Connection, ids: &[String]) -> Result<String, String> {
-    note_files::synchronize(connection)?;
+    note_files::migrate(connection)?;
     build_selected_context(read_selected_items(connection, ids)?)
 }
 
@@ -468,7 +478,7 @@ pub(crate) fn reference_transfer_snapshot(
     connection
         .busy_timeout(std::time::Duration::from_secs(1))
         .map_err(|e| e.to_string())?;
-    note_files::synchronize(&connection)?;
+    note_files::migrate(&connection)?;
     // Send the current bytes of changed originals. A reference whose files are
     // both gone keeps its existing error path in the exporter.
     if let Some(assets) = database.parent().map(|root| root.join("assets")) {
@@ -484,12 +494,16 @@ pub(crate) fn reference_transfer_snapshot(
 }
 
 pub(crate) fn reference_transfer_context(items: &[StashItem]) -> Result<String, String> {
-    context::build(items, true)
+    context::build(items)
+}
+
+pub(crate) fn native_reference_context(items: &[StashItem]) -> Result<String, String> {
+    context::native(items)
 }
 
 #[cfg(test)]
 fn build_selected_context(items: Vec<StashItem>) -> Result<String, String> {
-    context::build(&items, false)
+    context::build(&items)
 }
 
 #[derive(Debug, Deserialize)]
@@ -845,7 +859,7 @@ pub fn search_items(query: String, state: &LibraryState) -> Result<Vec<String>, 
         .connection
         .lock()
         .map_err(|_| "The local library is busy.".to_string())?;
-    note_files::synchronize(&connection)?;
+    note_files::migrate(&connection)?;
     match search::search_ids(&connection, &query)? {
         Some(ids) => Ok(ids),
         None => connection
@@ -904,7 +918,7 @@ pub fn save_items(items: Vec<StashItem>, state: &LibraryState) -> Result<(), Str
     for item in &items {
         upsert_item(&transaction, item)?;
     }
-    note_files::synchronize(&transaction)?;
+    note_files::migrate(&transaction)?;
     transaction.commit().map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -1290,6 +1304,10 @@ fn file_kind(path: &Path) -> (&'static str, &'static str) {
         .to_ascii_lowercase()
         .as_str()
     {
+        "mp4" => ("file", "video/mp4"),
+        "mov" => ("file", "video/quicktime"),
+        "webm" => ("file", "video/webm"),
+        "avi" => ("file", "video/x-msvideo"),
         "png" => ("image", "image/png"),
         "jpg" | "jpeg" => ("image", "image/jpeg"),
         "gif" => ("image", "image/gif"),
@@ -1896,14 +1914,14 @@ mod tests {
             let dragged = export_reference_file(&database, &ids, ExportKind::Drag).unwrap();
             let copied = export_reference_file(&database, &ids, ExportKind::Clipboard).unwrap();
             assert_eq!(
-                std::fs::read_to_string(&dragged.context_file).unwrap(),
+                std::fs::read_to_string(dragged.context_file().unwrap()).unwrap(),
                 context
             );
             assert_eq!(
-                std::fs::read(&copied.context_file).unwrap(),
-                std::fs::read(&dragged.context_file).unwrap()
+                std::fs::read(copied.context_file().unwrap()).unwrap(),
+                std::fs::read(dragged.context_file().unwrap()).unwrap()
             );
-            assert_ne!(copied.context_file.parent(), dragged.context_file.parent());
+            assert_ne!(copied.context_file().unwrap().parent(), dragged.context_file().unwrap().parent());
             crate::reference_transfer::discard(&copied);
             crate::reference_transfer::discard(&dragged);
         }
@@ -1972,6 +1990,7 @@ mod tests {
             excerpt: "Stored locally".into(),
             tags: vec!["SQLite".into(), "Local".into()],
             created_at: "2026-10-01T00:00:00Z".into(),
+            use_count: 0,
             favorite: true,
             preview: Some("data:image/jpeg;base64,dGVzdA==".into()),
             preview_status: None,
@@ -2049,6 +2068,7 @@ mod tests {
             excerpt: "Captured from a signed-in browser page.".into(),
             tags: vec!["Research".into()],
             created_at: "2026-10-02T00:00:00Z".into(),
+            use_count: 0,
             favorite: false,
             preview: None,
             preview_status: None,
@@ -2209,6 +2229,7 @@ mod tests {
             excerpt: "Delete this reference".into(),
             tags: vec!["Temporary".into()],
             created_at: "2026-10-02T00:00:00Z".into(),
+            use_count: 0,
             favorite: false,
             preview: None,
             preview_status: None,
@@ -2357,6 +2378,7 @@ mod tests {
             excerpt: "Local context".into(),
             tags: vec!["Docs".into()],
             created_at: "2026-10-01T00:00:00Z".into(),
+            use_count: 0,
             favorite: false,
             preview: None,
             preview_status: None,

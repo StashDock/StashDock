@@ -1,5 +1,6 @@
 //! Per-user browser manifests. Installation bundles remain sealed; only the
 //! owning provider's current registration can be removed by its uninstaller.
+use super::native_host::{has_usable_registration, Registration};
 use serde_json::Value;
 use std::{
     fs,
@@ -30,7 +31,11 @@ fn remove_owned(path: &Path, executable: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn register(provider: &str, executable: &Path, remove: bool) -> Result<(), String> {
+pub(super) fn register(
+    provider: &str,
+    executable: &Path,
+    mode: Registration,
+) -> Result<(), String> {
     let executable = fs::canonicalize(executable).map_err(|e| e.to_string())?;
     if fs::metadata(&executable)
         .map_err(|e| e.to_string())?
@@ -48,9 +53,14 @@ pub(super) fn register(provider: &str, executable: &Path, remove: bool) -> Resul
     for browser in ["chrome", "edge", "firefox"] {
         let directory = directory(&home, browser);
         let path = directory.join(format!("app.stashdock.{provider}.json"));
-        if remove {
+        if mode == Registration::Remove {
             remove_owned(&path, &executable)?;
         } else {
+            if mode == Registration::Ensure
+                && has_usable_registration(&path, provider, browser == "firefox")
+            {
+                continue;
+            }
             fs::create_dir_all(directory).map_err(|e| e.to_string())?;
             super::native_host::atomic_json(
                 &path,

@@ -7,6 +7,7 @@ import { libraryStore, useLibrary } from "./useLibrary";
 import { librarySession, useLibrarySession } from "./useLibrarySession";
 import { buildSearchIndex, filterItems, selectItems, summarizeItems } from "./selectors";
 import type { StashItem } from "../../types";
+import { sortReferences, type ReferenceSort } from '../../lib/reference-sort.mjs';
 import { referenceOpenTarget } from '../../lib/referenceOpen';
 import type { ReferenceImportHandle } from '../../components/ReferenceImportDialog';
 import type { ReferenceDeletion } from '../../components/ReferenceDeleteDialog';
@@ -15,9 +16,10 @@ type Answer = { query: string; results: string[] | null };
 const EVERYTHING: Answer = { query: '', results: null };
 
 export function useLibraryController(active: boolean, allowImport = true, editing = false) {
-  const { items, ready: storageReady, error, refresh: load } = useLibrary();
+  const { items, sort, setSort: saveSort, ready: storageReady, error, refresh: load } = useLibrary();
   const { filter, setFilter, activeTag, setActiveTag, query, setQuery, selectedIds, setSelectedIds, view, setView, copied, setCopied, copiedItemId, setCopiedItemId, refreshing, notice, setNotice, search, setSearch } = useLibrarySession();
   const refresh = () => librarySession.refresh(load);
+  const setSort = (next: ReferenceSort) => { void saveSort(next).catch(() => setNotice('Reference order could not be saved.', 3200)); };
   const importDialog = useRef<ReferenceImportHandle>(null);
   const [pendingDelete, setPendingDelete] = useState<ReferenceDeletion | null>(null);
   const deleteFlight = useRef(false);
@@ -73,10 +75,10 @@ export function useLibraryController(active: boolean, allowImport = true, editin
   const [settled, setSettled] = useState<Answer>(EVERYTHING);
   if (answered && answered !== settled) setSettled(answered);
   const shown = useDeferredValue(answered ?? settled), shownFilter = useDeferredValue(filter), shownTag = useDeferredValue(activeTag);
-  const visibleItems = useMemo(() => filterItems(items, searchIndex, shown.query, shownFilter, shownTag, shown.results ? new Set(shown.results) : null), [items, searchIndex, shown, shownFilter, shownTag]);
+  const visibleItems = useMemo(() => sortReferences(filterItems(items, searchIndex, shown.query, shownFilter, shownTag, shown.results ? new Set(shown.results) : null), sort), [items, searchIndex, shown, shownFilter, shownTag, sort]);
   // Spins only while the typed query is unanswered or still rendering, not
   // while unchanged results are re-checked after a background card update.
-  const shownKey = `${shown.query}\n${shownFilter}\n${shownTag ?? ''}`;
+  const shownKey = `${shown.query}\n${shownFilter}\n${shownTag ?? ''}\n${sort}`;
   const searching = active && storageReady && (answered ? answered !== shown : settled.query !== query);
   const selectedItems = useMemo(() => selectItems(items, selectedIds), [items, selectedIds]);
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -168,5 +170,5 @@ export function useLibraryController(active: boolean, allowImport = true, editin
     return () => window.removeEventListener("keydown", handleShortcut);
   }, [active, allowImport, editing, pendingDelete, handleCopy, selectedItems.length]);
 
-  return { storageReady, error, refresh, refreshing, searching, shownKey, shownQuery: shown.query, shownFilter, shownTag, filter, setFilter, activeTag, setActiveTag, query, setQuery, selectedItems, selectedSet, setSelectedIds, view, setView, importDialog, copied, copiedItemId, notice, setNotice, searchRef, counts, tags, visibleItems, toggleSelection, toggleFavorite, handleDelete, handleDeleteSelected, pendingDelete, setPendingDelete, deleting, deleteError, confirmDelete, handleOpenItem, addItems, replaceLink, handleCopy, handleCopyItem };
+  return { sort, setSort, storageReady, error, refresh, refreshing, searching, shownKey, shownQuery: shown.query, shownFilter, shownTag, filter, setFilter, activeTag, setActiveTag, query, setQuery, selectedItems, selectedSet, setSelectedIds, view, setView, importDialog, copied, copiedItemId, notice, setNotice, searchRef, counts, tags, visibleItems, toggleSelection, toggleFavorite, handleDelete, handleDeleteSelected, pendingDelete, setPendingDelete, deleting, deleteError, confirmDelete, handleOpenItem, addItems, replaceLink, handleCopy, handleCopyItem };
 }

@@ -15,7 +15,7 @@ import { resolveManagedFile } from '../plugins/stashdock/server/open-file.mjs';
 test('file context carries original-reading requirements independently of editable supplemental text', () => {
   const file = { id: 'excel', title: 'Budget', kind: 'file', assetPath: 'managed/budget.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', contextOverride: '', origin: { fileName: 'budget.xlsx' } };
   const text = prepareAttachment([file], ['excel']).content[0].resource.text;
-  assert.match(text, /^# Original files\nRead each file with get_stashdock_file \(its ID below\) before answering about it\. The context below describes the files; it is not their contents\.\n- budget\.xlsx \(application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet\) · ID excel\n/);
+  assert.match(text, /^# Original files\nRead each file with get_stashdock_file \(its ID below\) before answering about it\.\n- budget\.xlsx \(application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet\) · ID excel\n/);
   // How to read and what to say when a file cannot be read travel with the tool.
   assert.doesNotMatch(text, /managed\/budget.xlsx/);
   assert.equal(readContextBatch([file], ['excel']).items[0].originalFile.contentRead, false);
@@ -48,8 +48,8 @@ test('MCP resolves only saved original IDs; a host reader obtains unchanged byte
     const draft = await call('prepare_stashdock_attachment', { ids: [file.id, note.id] });
     assert.match(draft._meta.attachment.content[0].resource.text, /Use the forecast tab/);
     const noteFile = await call('get_stashdock_file', { id: note.id });
-    assert.equal(noteFile.isError, undefined);
-    assert.equal(readFileSync(noteFile.structuredContent.path, 'utf8'), note.content);
+    assert.equal(noteFile.isError, true);
+    assert.match(draft._meta.attachment.content[0].resource.text, /Metadata only/);
     for (const id of ['missing', '../../secret']) assert.equal((await call('get_stashdock_file', { id })).isError, true);
     rmSync(file.assetPath);
     assert.equal((await call('get_stashdock_file', { id: file.id })).isError, true);

@@ -15,20 +15,28 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager};
 
 type DragKey = (String, String);
-static DRAGS: OnceLock<Mutex<HashMap<DragKey, crate::reference_transfer::Transfer>>> =
-    OnceLock::new();
-fn drags() -> &'static Mutex<HashMap<DragKey, crate::reference_transfer::Transfer>> {
+struct PendingDrag {
+    file: crate::reference_transfer::Transfer,
+    reference_id: String,
+}
+static DRAGS: OnceLock<Mutex<HashMap<DragKey, PendingDrag>>> = OnceLock::new();
+fn drags() -> &'static Mutex<HashMap<DragKey, PendingDrag>> {
     DRAGS.get_or_init(Mutex::default)
 }
 fn finish_drag(key: &DragKey, dropped: bool) {
-    if let Some(file) = drags()
+    if let Some(PendingDrag { file, reference_id }) = drags()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(key)
     {
         tauri::async_runtime::spawn_blocking(move || {
             if dropped {
-                reference_drag::prune_exports(&file.context_file);
+                if let Some(app) = APP.get() {
+                    library::usage::record_transfer(app, &[reference_id]);
+                }
+                if let Some(path) = file.export_anchor() {
+                    reference_drag::prune_exports(path);
+                }
             } else {
                 crate::reference_transfer::discard(&file);
             }
@@ -280,6 +288,7 @@ extern "C" fn event(raw: *const c_char) {
         {
             tauri::async_runtime::spawn(async move {
                 let handle = app.clone();
+                let reference_id = id.clone();
                 let result = WORK
                     .run(move || {
                         reference_drag::export_reference_file(
@@ -293,7 +302,14 @@ extern "C" fn event(raw: *const c_char) {
                     Ok(file) => {
                         let recovery = file.clone();
                         let key = (session.clone(), token.clone());
-                        let response = json!({"session":session,"token":token,"paths":file.files});
+                        let response = match &file {
+                            crate::reference_transfer::Transfer::Text(text) => {
+                                json!({"session":session,"token":token,"text":text})
+                            }
+                            crate::reference_transfer::Transfer::Files { files, .. } => {
+                                json!({"session":session,"token":token,"paths":files})
+                            }
+                        };
                         if app
                             .run_on_main_thread(move || {
                                 let mut active = drags().lock().unwrap_or_else(|e| e.into_inner());
@@ -304,7 +320,7 @@ extern "C" fn event(raw: *const c_char) {
                                     });
                                     return;
                                 }
-                                active.insert(key.clone(), file);
+                                active.insert(key.clone(), PendingDrag { file, reference_id });
                                 drop(active);
                                 // Swift accepts only the still-held original gesture.
                                 // Rejected/stale offers release their own copies now.
@@ -594,18 +610,24 @@ mod tests {
             std::fs::create_dir(&folder).unwrap();
             let context_file = folder.join("StashDock - QA.md");
             std::fs::write(&context_file, b"test context").unwrap();
-            crate::reference_transfer::Transfer {
+            crate::reference_transfer::Transfer::Files {
                 files: vec![context_file.clone()],
-                context_file,
+                context_file: Some(context_file),
             }
         };
         let cancelled = group();
-        let cancelled_path = cancelled.context_file.clone();
+        let cancelled_path = cancelled.context_file().unwrap().to_path_buf();
         let key = (
             uuid::Uuid::new_v4().to_string(),
             uuid::Uuid::new_v4().to_string(),
         );
-        drags().lock().unwrap().insert(key.clone(), cancelled);
+        drags().lock().unwrap().insert(
+            key.clone(),
+            PendingDrag {
+                file: cancelled,
+                reference_id: String::new(),
+            },
+        );
         finish_drag(&("different session".into(), key.1.clone()), false);
         assert!(cancelled_path.is_file());
         finish_drag(&key, false);
@@ -615,8 +637,14 @@ mod tests {
         }
         assert!(!cancelled_path.exists());
         let delivered = group();
-        let delivered_path = delivered.context_file.clone();
-        drags().lock().unwrap().insert(key.clone(), delivered);
+        let delivered_path = delivered.context_file().unwrap().to_path_buf();
+        drags().lock().unwrap().insert(
+            key.clone(),
+            PendingDrag {
+                file: delivered,
+                reference_id: String::new(),
+            },
+        );
         finish_drag(&key, true);
         assert!(delivered_path.is_file());
         assert!(!drags().lock().unwrap().contains_key(&key));

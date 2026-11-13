@@ -55,7 +55,7 @@ test('identical saves deduplicate across connections/restarts and never overwrit
     assert.equal(retried.created, false); assert.equal(retried.item.id, first.item.id);
     assert.equal(retried.item.title, 'User-edited title'); assert.deepEqual(retried.item.tags, ['Keep']);
     assert.equal(retried.item.contextOverride, 'User final context');
-    assert.equal(readFileSync(retried.item.assetPath, 'utf8'), note.content);
+    assert.equal(retried.item.content, note.content);
     assert.equal((await library.read()).length, 1);
     library.remove(first.item.id);
     const recreated = other.saveContextReference(note);
@@ -128,7 +128,8 @@ test('model reads distinguish original note projections, file annotations, summa
   ];
   const result = readContextBatch(input, input.map(item => item.id));
   assert.deepEqual(result.items.map(item => item.contextSource), ['note_text', 'supplemental', 'excerpt', 'saved_page']);
-  assert.equal(result.items[0].originalFile.filename, 'note.txt');
+  assert.equal(result.items[0].originalFile, undefined);
+  assert.equal(result.items[0].hasFile, false);
   assert.equal(result.items[1].originalFile.filename, 'book.xlsx');
   assert.equal(result.items[3].publishedAt, '2026-10-01');
   assert.equal(result.items[3].captureTruncated, true);

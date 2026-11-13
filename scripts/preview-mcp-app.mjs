@@ -81,7 +81,7 @@ const http = createHttpServer(async (request, response) => {
       const writeTools = ['open_stashdock_storage_folder', 'choose_stashdock_storage_location', 'move_stashdock_storage', 'save_stashdock_preferences', 'import_stashdock_references', 'import_stashdock_files', 'set_stashdock_favorite', 'set_stashdock_tags', 'edit_stashdock_reference', 'edit_stashdock_context', 'rename_stashdock_tag', 'delete_stashdock_tag', 'delete_stashdock_reference','open_stashdock_capture_site','save_stashdock_capture_platform'];
       // Test mutations must never target the actual user's collection.
       readTools.push('search_stashdock', 'list_stashdock_tags', 'get_stashdock_items', 'get_stashdock_file');
-      writeTools.push('save_stashdock_reference', 'delete_stashdock_references');
+      writeTools.push('save_stashdock_reference', 'delete_stashdock_references', 'set_stashdock_sort', 'record_stashdock_use');
       const isolated = process.env.STASHDOCK_PREVIEW_MUTATIONS === '1' && process.env.STASHDOCK_DATA_DIR?.includes('mcp-test-');
       if (!readTools.includes(input.name) && !(isolated && writeTools.includes(input.name))) throw new Error('Tool not allowed in test harness');
       const result = await client.callTool(input, undefined, { timeout: input.name === 'choose_stashdock_storage_location' ? 300_000 : input.name === 'move_stashdock_storage' ? 660_000 : 60_000 });

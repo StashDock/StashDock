@@ -142,7 +142,10 @@ pub(crate) fn export_filename(context: &str, count: usize) -> String {
         .collect();
     // Each transfer has its own folder, so the name needs no unique suffix.
     let title = title.trim_matches([' ', '.']);
-    format!("StashDock - {}.md", if title.is_empty() { "Reference" } else { title })
+    format!(
+        "StashDock - {}.md",
+        if title.is_empty() { "Reference" } else { title }
+    )
 }
 
 #[cfg(any(windows, target_os = "macos"))]
@@ -214,6 +217,7 @@ fn start(
         return Err("A reference drag is already active.".into());
     }
     let _guard = ActiveGuard(&state.active);
+    let usage_ids = request.item_ids.clone();
     #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = database;
@@ -234,7 +238,7 @@ fn start(
             } else if !left_button_down() {
                 Ok(DragOutcome::released())
             } else {
-                crate::reference_drag_windows::start(&file.files, &image, request.hotspot)
+                crate::reference_drag_windows::start(&file, &image, request.hotspot)
             };
             let _ = tx.send(result);
         })
@@ -246,7 +250,10 @@ fn start(
         if !result.as_ref().is_ok_and(|outcome| outcome.dropped) {
             crate::reference_transfer::discard(&keep_file);
         } else {
-            prune_exports(&keep_file.context_file);
+            crate::library::usage::record_transfer(&app, &usage_ids);
+            if let Some(path) = keep_file.export_anchor() {
+                prune_exports(path);
+            }
         }
         result
     }
@@ -263,7 +270,7 @@ fn start(
             let failure = tx.clone();
             if let Err(error) = crate::reference_transfer_macos::start_drag(
                 &source,
-                &file.files,
+                &file,
                 &image,
                 request.hotspot,
                 tx,
@@ -276,7 +283,10 @@ fn start(
             .recv()
             .map_err(|_| "The reference drag was interrupted.".to_string())?;
         if result.as_ref().is_ok_and(|outcome| outcome.dropped) {
-            prune_exports(&keep.context_file);
+            crate::library::usage::record_transfer(&app, &usage_ids);
+            if let Some(path) = keep.export_anchor() {
+                prune_exports(path);
+            }
         } else {
             crate::reference_transfer::discard(&keep);
         }
@@ -373,7 +383,10 @@ mod tests {
     fn exported_names_are_recognizable_without_becoming_file_paths() {
         let name = export_filename("# StashDock context\n\n## CON: / example <test>", 1);
         assert_eq!(name, "StashDock - CON  example test.md");
-        assert_eq!(export_filename("## First", 2), "StashDock - Selected references.md");
+        assert_eq!(
+            export_filename("## First", 2),
+            "StashDock - Selected references.md"
+        );
         assert_eq!(export_filename("## ...", 1), "StashDock - Reference.md");
     }
     #[test]

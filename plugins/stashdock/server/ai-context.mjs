@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { canonicalReferenceUrl } from '../../../src/lib/reference-url.mjs';
-import { contextBody, referenceFileName } from '../../../src/lib/context-format.mjs';
+import { contextBody, hasContextFile, referenceFileName } from '../../../src/lib/context-format.mjs';
 import { tagRevision } from './library.mjs';
 
 // Shared contract for model calls and direct library writes. No paths,
@@ -53,12 +53,13 @@ export function readContextBatch(items, ids, maxCharacters = 60_000) {
   return { items: unique.map(id => {
     const item = byId.get(id), override = typeof item.contextOverride === 'string';
     const described = contextBody(item);
+    const hasFile = hasContextFile(item);
     const body = override ? item.contextOverride : described.body;
     let end = Math.min(perItem, body.length);
     if (end < body.length && /[\uD800-\uDBFF]/.test(body[end - 1] || '')) end--;
     return { id, title: item.title, kind: item.kind, source: item.source, url: item.url,
-      tags: item.tags || [], tagRevision: tagRevision(item), hasFile: Boolean(item.assetPath || item.hasFile), mimeType: item.mimeType,
-      ...(item.assetPath || item.hasFile ? { originalFile: { tool: 'get_stashdock_file', id, filename: referenceFileName(item), contentRead: false } } : {}),
+      tags: item.tags || [], tagRevision: tagRevision(item), hasFile, mimeType: item.mimeType,
+      ...(hasFile ? { originalFile: { tool: 'get_stashdock_file', id, filename: referenceFileName(item), contentRead: false } } : {}),
       contentOrigin: item.origin?.contentOrigin, sourceUrls: item.origin?.sourceUrls,
       context: body.slice(0, end), contextSource: override ? 'user_override' : described.source,
       publishedAt: item.origin?.publishedAt, captureMethod: item.origin?.captureMethod,

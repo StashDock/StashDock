@@ -1,7 +1,9 @@
-//! Windows file transport for the foreground StashDock source window only.
+//! Windows text and file transport for the foreground StashDock source window.
 //! Never synthesize input, change focus, or attach input queues.
 use super::reference_drag::{DragOutcome, DragStatus};
+use super::reference_transfer::Transfer;
 use std::{
+    cell::RefCell,
     path::PathBuf,
     sync::{Arc, Mutex},
     time::Instant,
@@ -11,7 +13,7 @@ use windows::{
     Win32::{
         Foundation::*,
         Graphics::Gdi::*,
-        System::{Com::*, Ole::*, SystemServices::MODIFIERKEYS_FLAGS},
+        System::{Com::*, Memory::*, Ole::*, SystemServices::MODIFIERKEYS_FLAGS},
         UI::{Input::KeyboardAndMouse::*, Shell::*},
     },
 };
@@ -202,32 +204,162 @@ fn shell_data(files: &[PathBuf]) -> Result<IDataObject> {
     unsafe { items.BindToHandler(None, &BHID_DataObject) }
 }
 
-/// The same Shell IDataObject as dragging, with durable file clipboard formats.
-pub fn copy_to_clipboard(files: &[PathBuf]) -> std::result::Result<(), String> {
+// The Shell object owns and duplicates STGMEDIUMs, including the drag image.
+// Expose only formats we set: an empty Shell object also advertises CF_HDROP.
+#[implement(IDataObject)]
+struct TextData {
+    storage: IDataObject,
+    formats: RefCell<Vec<FORMATETC>>,
+}
+
+impl TextData {
+    fn supports(&self, format: *const FORMATETC) -> bool {
+        // COM supplies a valid FORMATETC for the duration of the call.
+        let Some(format) = (unsafe { format.as_ref() }) else {
+            return false;
+        };
+        self.formats.borrow().iter().any(|stored| {
+            stored.cfFormat == format.cfFormat
+                && stored.dwAspect == format.dwAspect
+                && stored.lindex == format.lindex
+                && stored.tymed & format.tymed != 0
+        })
+    }
+}
+
+impl IDataObject_Impl for TextData {
+    fn GetData(&self, format: *const FORMATETC) -> Result<STGMEDIUM> {
+        self.QueryGetData(format).ok()?;
+        unsafe { self.storage.GetData(format) }
+    }
+    fn GetDataHere(&self, format: *const FORMATETC, medium: *mut STGMEDIUM) -> Result<()> {
+        self.QueryGetData(format).ok()?;
+        unsafe { self.storage.GetDataHere(format, medium) }
+    }
+    fn QueryGetData(&self, format: *const FORMATETC) -> HRESULT {
+        if !self.supports(format) {
+            return DV_E_FORMATETC;
+        }
+        unsafe { self.storage.QueryGetData(format) }
+    }
+    fn GetCanonicalFormatEtc(&self, format: *const FORMATETC, output: *mut FORMATETC) -> HRESULT {
+        unsafe { self.storage.GetCanonicalFormatEtc(format, output) }
+    }
+    fn SetData(
+        &self,
+        format: *const FORMATETC,
+        medium: *const STGMEDIUM,
+        release: BOOL,
+    ) -> Result<()> {
+        let value = unsafe { format.as_ref() }.ok_or_else(|| Error::from(E_POINTER))?;
+        // No target-device allocations are retained from a caller-owned pointer.
+        if !value.ptd.is_null() {
+            return Err(DV_E_DVTARGETDEVICE.into());
+        }
+        unsafe { self.storage.SetData(format, medium, release) }?;
+        let mut formats = self.formats.borrow_mut();
+        if let Some(stored) = formats.iter_mut().find(|stored| {
+            stored.cfFormat == value.cfFormat
+                && stored.dwAspect == value.dwAspect
+                && stored.lindex == value.lindex
+        }) {
+            stored.tymed |= value.tymed;
+        } else {
+            formats.push(*value);
+        }
+        Ok(())
+    }
+    fn EnumFormatEtc(&self, direction: u32) -> Result<IEnumFORMATETC> {
+        if direction != DATADIR_GET.0 as u32 {
+            return Err(E_NOTIMPL.into());
+        }
+        unsafe { SHCreateStdEnumFmtEtc(&self.formats.borrow()) }
+    }
+    fn DAdvise(
+        &self,
+        format: *const FORMATETC,
+        flags: u32,
+        sink: Option<&IAdviseSink>,
+    ) -> Result<u32> {
+        unsafe { self.storage.DAdvise(format, flags, sink) }
+    }
+    fn DUnadvise(&self, connection: u32) -> Result<()> {
+        unsafe { self.storage.DUnadvise(connection) }
+    }
+    fn EnumDAdvise(&self) -> Result<IEnumSTATDATA> {
+        unsafe { self.storage.EnumDAdvise() }
+    }
+}
+
+fn transfer_data(transfer: &Transfer) -> Result<IDataObject> {
+    let text = match transfer {
+        Transfer::Text(text) => text,
+        Transfer::Files { files, .. } => return shell_data(files),
+    };
+    let data: IDataObject = TextData {
+        storage: unsafe { SHCreateDataObject(None, None, None::<&IDataObject>) }?,
+        formats: RefCell::new(Vec::new()),
+    }
+    .into();
+    if text.contains('\0') {
+        return Err(Error::new(
+            E_INVALIDARG,
+            "The note contains unsupported null characters.".into(),
+        ));
+    }
+    let text: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+    let handle = unsafe { GlobalAlloc(GMEM_MOVEABLE, text.len() * std::mem::size_of::<u16>()) }?;
+    let target = unsafe { GlobalLock(handle) }.cast::<u16>();
+    if target.is_null() {
+        let error = Error::from_win32();
+        let _ = unsafe { GlobalFree(handle) };
+        return Err(error);
+    }
+    unsafe { std::ptr::copy_nonoverlapping(text.as_ptr(), target, text.len()) };
+    let _ = unsafe { GlobalUnlock(handle) };
+    let format = FORMATETC {
+        cfFormat: CF_UNICODETEXT.0,
+        ptd: std::ptr::null_mut(),
+        dwAspect: DVASPECT_CONTENT.0 as u32,
+        lindex: -1,
+        tymed: TYMED_HGLOBAL.0 as u32,
+    };
+    let medium = STGMEDIUM {
+        tymed: TYMED_HGLOBAL.0 as u32,
+        u: STGMEDIUM_0 { hGlobal: handle },
+        pUnkForRelease: std::mem::ManuallyDrop::new(None),
+    };
+    if let Err(error) = unsafe { data.SetData(&format, &medium, true) } {
+        let _ = unsafe { GlobalFree(handle) };
+        return Err(error);
+    }
+    Ok(data)
+}
+
+/// Use the same data object as dragging and keep the formats after app exit.
+pub fn copy_to_clipboard(transfer: &Transfer) -> std::result::Result<(), String> {
     unsafe { OleInitialize(None) }
         .map_err(|e| format!("Could not initialize clipboard copying: {e}"))?;
     let _ole = OleSession;
     let data =
-        shell_data(files).map_err(|e| format!("Could not prepare the reference files: {e}"))?;
+        transfer_data(transfer).map_err(|e| format!("Could not prepare the reference: {e}"))?;
     unsafe { OleSetClipboard(&data) }
         .map_err(|e| format!("Clipboard access was blocked. Try again: {e}"))?;
-    // Materialize CF_HDROP now; copying must survive this object's/app's lifetime.
+    // Materialize the formats now so copying survives this object's lifetime.
     unsafe { OleFlushClipboard() }
         .map_err(|e| format!("Could not finish clipboard copying. Try again: {e}"))
 }
 
 pub fn start(
-    files: &[PathBuf],
+    transfer: &Transfer,
     png: &[u8],
     hotspot: Option<super::reference_drag::DragHotspot>,
 ) -> std::result::Result<DragOutcome, String> {
     unsafe { OleInitialize(None) }
         .map_err(|e| format!("Could not initialize reference dragging: {e}"))?;
     let _ole = OleSession;
-    // A real Shell IDataObject carries CF_HDROP, including the actual local path.
-    // No fabricated browser File and no private Codex transfer format.
-    let data =
-        shell_data(files).map_err(|e| format!("Could not prepare the reference transfer: {e}"))?;
+    let data = transfer_data(transfer)
+        .map_err(|e| format!("Could not prepare the reference transfer: {e}"))?;
     let (bitmap, width, height) = drag_bitmap(png)?;
     let helper: IDragSourceHelper =
         unsafe { CoCreateInstance(&CLSID_DragDropHelper, None, CLSCTX_INPROC_SERVER) }
@@ -304,7 +436,7 @@ mod tests {
     }
     #[test]
     #[ignore = "Writes the OS clipboard; run explicitly for file-copy acceptance"]
-    fn copied_markdown_survives_source_thread_and_reads_as_a_real_file() {
+    fn copied_files_and_note_text_survive_the_source_thread() {
         assert_eq!(
             std::env::var("STASHDOCK_CLIPBOARD_TEST").as_deref(),
             Ok("1")
@@ -349,7 +481,11 @@ mod tests {
         std::fs::write(&pdf, b"%PDF-1.4\0 unchanged original").unwrap();
         std::fs::write(&document, b"PK\0 unchanged original").unwrap();
         let sources = vec![pdf.clone(), document.clone(), file.clone()];
-        std::thread::spawn(move || copy_to_clipboard(&sources).unwrap())
+        let transfer = Transfer::Files {
+            files: sources,
+            context_file: Some(file.clone()),
+        };
+        std::thread::spawn(move || copy_to_clipboard(&transfer).unwrap())
             .join()
             .unwrap();
         // Read from a new COM apartment after the copying thread and IDataObject
@@ -381,6 +517,36 @@ mod tests {
             std::fs::read(&pdf).unwrap(),
             b"%PDF-1.4\0 unchanged original"
         );
+        drop(data);
+        let note = "Note body 中文\nReady for the conversation.";
+        // Verify originals-only payloads through the real persistent OLE path.
+        let bare = Transfer::Files { files: vec![pdf.clone(), document.clone()], context_file: None };
+        std::thread::spawn(move || copy_to_clipboard(&bare).unwrap()).join().unwrap();
+        let data = retry_clipboard(|| unsafe { OleGetClipboard() }).unwrap();
+        let mut medium = unsafe { data.GetData(&format) }.unwrap();
+        let hdrop = HDROP(unsafe { medium.u.hGlobal.0 } as isize);
+        assert_eq!(unsafe { DragQueryFileW(hdrop, u32::MAX, None) }, 2);
+        unsafe { ReleaseStgMedium(&mut medium); }
+        drop(data);
+        std::thread::spawn(move || copy_to_clipboard(&Transfer::Text(note.into())).unwrap())
+            .join()
+            .unwrap();
+        let data = retry_clipboard(|| unsafe { OleGetClipboard() }).unwrap();
+        let text_format = FORMATETC {
+            cfFormat: CF_UNICODETEXT.0,
+            ..format
+        };
+        let mut medium = unsafe { data.GetData(&text_format) }.unwrap();
+        unsafe {
+            let handle = medium.u.hGlobal;
+            let ptr = GlobalLock(handle).cast::<u16>();
+            assert!(!ptr.is_null());
+            let units = std::slice::from_raw_parts(ptr, note.encode_utf16().count());
+            assert_eq!(String::from_utf16(units).unwrap(), note);
+            let _ = GlobalUnlock(handle);
+            ReleaseStgMedium(&mut medium);
+            assert!(data.QueryGetData(&format).is_err());
+        }
         drop(data);
         restore
             .restore()
@@ -417,6 +583,63 @@ mod tests {
             [64, 0, 128, 128, 15, 10, 5, 255]
         );
     }
+    #[test]
+    fn note_transfer_has_unicode_text_and_no_file_drop() {
+        unsafe { OleInitialize(None) }.unwrap();
+        let _ole = OleSession;
+        let body = "笔记\nA complete note";
+        let data = transfer_data(&Transfer::Text(body.into())).unwrap();
+        let mut format = FORMATETC {
+            cfFormat: CF_UNICODETEXT.0 as u16,
+            dwAspect: DVASPECT_CONTENT.0,
+            lindex: -1,
+            tymed: TYMED_HGLOBAL.0 as u32,
+            ..Default::default()
+        };
+        unsafe {
+            let mut medium = data.GetData(&format).unwrap();
+            let handle = medium.u.hGlobal;
+            let ptr = GlobalLock(handle).cast::<u16>();
+            assert!(!ptr.is_null());
+            let units = std::slice::from_raw_parts(ptr, body.encode_utf16().count() + 1);
+            assert_eq!(String::from_utf16(&units[..units.len() - 1]).unwrap(), body);
+            assert_eq!(units.last(), Some(&0));
+            let _ = GlobalUnlock(handle);
+            ReleaseStgMedium(&mut medium);
+            format.cfFormat = CF_HDROP.0 as u16;
+            assert!(data.QueryGetData(&format).is_err());
+            assert!(data.GetData(&format).is_err());
+            let enumerator = data.EnumFormatEtc(DATADIR_GET.0 as u32).unwrap();
+            let mut formats = [FORMATETC::default(); 8];
+            let mut count = 0;
+            enumerator
+                .Next(&mut formats, Some(&mut count))
+                .ok()
+                .unwrap();
+            assert_eq!(count, 1);
+            assert_eq!(formats[0].cfFormat, CF_UNICODETEXT.0);
+            let (bitmap, width, height) =
+                drag_bitmap(include_bytes!("../icons/32x32.png")).unwrap();
+            let helper: IDragSourceHelper =
+                CoCreateInstance(&CLSID_DragDropHelper, None, CLSCTX_INPROC_SERVER).unwrap();
+            helper
+                .InitializeFromBitmap(
+                    &SHDRAGIMAGE {
+                        sizeDragImage: SIZE {
+                            cx: width,
+                            cy: height,
+                        },
+                        ptOffset: POINT { x: 8, y: 8 },
+                        hbmpDragImage: bitmap.0,
+                        crColorKey: COLORREF(0xffffffff),
+                    },
+                    &data,
+                )
+                .unwrap();
+            assert!(data.QueryGetData(&format).is_err());
+        }
+    }
+
     #[test]
     fn windows_shell_exports_a_real_file_and_accepts_the_alpha_preview() {
         unsafe { OleInitialize(None) }.unwrap();

@@ -1,13 +1,27 @@
 import { readFileSync, statSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import { parse } from 'smol-toml';
 import { browserExtensionDetected } from './browser-presence.mjs';
 import productLinks from '../../../src-tauri/product-links.json' with { type: 'json' };
 import { githubRepositoryUrl } from './open-integration.mjs';
 import { validBrowserExtensionId, pinnedBrowserExtensionId, nativeFirefoxOrigin, nativeSafariOrigin } from '../../../src/lib/browser-extension-identity.mjs';
-const ids = ['chrome', 'edge', 'firefox', 'safari', 'codex', 'claude', 'desktop'];
+const ids = ['chrome', 'edge', 'firefox', 'safari', 'codex', 'dsh', 'claude', 'desktop'];
 function fileExists(path) { try { return isAbsolute(path) && statSync(path).isFile(); } catch { return false; } }
+function packageAt(path) {
+  try { return statSync(path).size <= 2_000_000 ? JSON.parse(readFileSync(path, 'utf8')) : null; } catch { return null; }
+}
+// Inspect only the profile that registered this package, never scan unrelated
+// profiles. An uninstalled package or removed bundle must not stay Detected.
+export function dshPluginDetected(manifest) {
+  if (!fileExists(manifest) || packageAt(manifest)?.name !== 'stashdock-dsh' || !fileExists(join(dirname(manifest), 'index.mjs'))) return false;
+  for (let directory = dirname(dirname(manifest)), depth = 0; depth < 12; depth++, directory = dirname(directory)) {
+    const profile = packageAt(join(directory, 'package.json'))?.dsh?.profile;
+    if (profile) return Array.isArray(profile.bundles) && profile.bundles.includes('stashdock-dsh');
+    if (directory === dirname(directory)) break;
+  }
+  return false;
+}
 export function configuredCodexPlugin(text, manifest) {
   try {
     const config = parse(text);
@@ -23,12 +37,12 @@ export function codexPluginDetected(manifest, { home = process.env.CODEX_HOME ||
     return statSync(path).size <= 2_000_000 && configuredCodexPlugin(readFileSync(path, 'utf8'), manifest);
   } catch { return false; }
 }
-export function readIntegrations(read, { codexEnabled = codexPluginDetected, browserEnabled = browserExtensionDetected, platform = process.platform } = {}) {
+export function readIntegrations(read, { codexEnabled = codexPluginDetected, dshInstalled = dshPluginDetected, browserEnabled = browserExtensionDetected, platform = process.platform } = {}) {
   return { items: ids.map(id => {
     let record;
     try { record = JSON.parse(read(`installation_${id}_v1`) || 'null'); } catch { /* Corrupt optional presence is not an installation. */ }
     let detected = Boolean(record && typeof record.version === 'string' &&
-      (record.path ? typeof record.path === 'string' && fileExists(record.path) && (id !== 'codex' || codexEnabled(record.path)) :
+      (record.path ? typeof record.path === 'string' && fileExists(record.path) && (id !== 'codex' || codexEnabled(record.path)) && (id !== 'dsh' || dshInstalled(record.path)) :
         browserEnabled(id, record.extensionId)));
     if (id === 'chrome' && !detected) {
       try {

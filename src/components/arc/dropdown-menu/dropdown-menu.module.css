@@ -4,6 +4,7 @@
 .trigger[data-state="open"] { border-color: var(--border-strong); background: var(--surface-muted); box-shadow: none; }
 .trigger:active { border-color: var(--border-strong); background: color-mix(in oklab, var(--surface-muted), var(--border) 55%); box-shadow: none; }
 .item:focus-visible { outline: none; }
+.check { display: inline-flex; width: 15px; margin-left: auto; flex: none; }
 .triggerIcon { display: inline-flex; flex: none; color: var(--text-secondary); }
 .label { position: relative; display: inline-flex; min-width: 0; flex: 0 1 auto; overflow-x: clip; }
 .labelMeasure { position: absolute; top: 0; left: 0; visibility: hidden; white-space: nowrap; pointer-events: none; }

@@ -1,6 +1,7 @@
 import type { DragEvent } from "react";
 import type { StashItem } from "../types";
 import { buildContext } from "./context";
+import { hasContextFile } from "./context-format.mjs";
 import { isTauri } from "@tauri-apps/api/core";
 import { dragReferenceFile } from "./reference-drag-native";
 
@@ -14,7 +15,7 @@ export function referenceDragPayload(items: StashItem[]) {
     "text/plain": context,
     "text/markdown": context,
     "text/html": `<pre style="white-space:pre-wrap">${escapeHtml(context)}</pre>`,
-    "text/uri-list": items.flatMap(item => item.url ? [item.url] : []).join("\r\n"),
+    "text/uri-list": items.some(item => item.kind === "note") ? "" : items.flatMap(item => item.url ? [item.url] : []).join("\r\n"),
   };
 }
 
@@ -188,7 +189,6 @@ export function startReferenceDrag(event: DragEvent<HTMLElement>, items: StashIt
     source.dataset.dragging = 'true';
     const bounds = source.getBoundingClientRect();
     const hotspot = selectionBar(source) ? { x: Math.round(event.clientX - bounds.left), y: Math.round(event.clientY - bounds.top) } : undefined;
-    // Restore the simple source-owned Shell image and original real .md drag.
     void dragReferenceFile(items.map(item => item.id), png, hotspot).catch(error => {
       window.dispatchEvent(new CustomEvent("reference-drag-error", {detail: error instanceof Error ? error.message : String(error)}));
     }).finally(() => { nativeDragPending = false; delete source.dataset.dragging; });
@@ -204,7 +204,9 @@ export function startReferenceDrag(event: DragEvent<HTMLElement>, items: StashIt
   }
   // DownloadURL is a separate compatibility hint for drag-out file targets.
   // Browser sidebars have no source-owned native bridge; file receipt is not promised.
-  event.dataTransfer.setData("DownloadURL", referenceDownloadPayload(buildContext(items), items[0].title, items.length));
+  if (!items.some(item => item.kind === "note") || items.some(hasContextFile)) {
+    event.dataTransfer.setData("DownloadURL", referenceDownloadPayload(buildContext(items), items[0].title, items.length));
+  }
   if (preview) {
     mountPreview(preview, source);
     event.dataTransfer.setDragImage(preview, 24, 24);

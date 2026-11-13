@@ -21,8 +21,27 @@ const item = { id: 'a', title: 'Saved page', kind: 'web', source: 'fixture.test'
 const htmlUrl = new URL('../plugins/stashdock/web/shelf.html', import.meta.url);
 const source = await readFile(new URL('../src/features/mcp-app/draft.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText
-  .replace("'@openai/mcp-extensions/app'", JSON.stringify(new URL('../node_modules/@openai/mcp-extensions/dist/app/index.js', import.meta.url).href));
+  .replace("'@openai/mcp-extensions/app'", JSON.stringify(new URL('../node_modules/@openai/mcp-extensions/dist/app/index.js', import.meta.url).href))
+  .replace("'./dsh-draft.mjs'", JSON.stringify(new URL('../src/features/mcp-app/dsh-draft.mjs', import.meta.url).href));
 const draft = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
+
+test('DSH Add passes final Markdown with an explicit draft-only intent', async () => {
+  const key = 'stashdock/dsh-draft';
+  const attachment = prepareAttachment([item], ['a']);
+  const host = {
+    getHostCapabilities: () => ({ message: { text: {} }, experimental: { [key]: {} } }),
+    sendMessage: async params => {
+      assert.deepEqual(params, {
+        role: 'user',
+        content: [{ type: 'text', text: attachment.content[0].resource.text }],
+        _meta: { [key]: { send: false, title: attachment.title } },
+      });
+      return {};
+    },
+  };
+  await draft.addAttachmentToDraft(host, attachment);
+  await assert.rejects(draft.addAttachmentToDraft({ ...host, sendMessage: async () => ({ isError: true }) }, attachment));
+});
 
 test('snapshot matches the final editor context, order and provenance; top-level content is only an embedded resource', () => {
   const result = prepareAttachment([item, { ...item, id: 'b', title: 'Second', content: 'Other' }], ['b', 'a', 'b']);

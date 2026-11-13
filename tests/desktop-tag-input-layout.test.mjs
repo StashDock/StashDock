@@ -39,7 +39,7 @@ test('card menu offers separate metadata and content editors only through its tr
   const tags = await readFile('src/components/TagEditor.tsx', 'utf8');
   assert.match(await readFile('src/components/referenceActions.tsx', 'utf8'), /label: 'Edit content'/); assert.match(card, /actions=\{menuActions\}/);
   assert.doesNotMatch(card, /<DesktopMenu context/);
-  assert.match(content, /<Textarea label=\{t\("Context content"\)\}/); assert.match(content, /onSave\(item.id, content\)/);
+  assert.match(content, /hasContextFile\(item\) \? 'Supplemental context \(optional\)' : 'Context content'/); assert.match(content, /onSave\(item.id, content\)/);
   assert.match(content, /size="wide"/); assert.match(content, /setSaved\(true\); onClose\(\)/);
   assert.match(tags, /setSaved\(true\); onClose\(\)/);
 });

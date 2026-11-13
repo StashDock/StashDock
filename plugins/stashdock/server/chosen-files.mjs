@@ -2,17 +2,19 @@
 // (see original-files.mjs). Choosing only stages short-lived tokens; the App
 // never sends a path, and Save is a separate, explicit action.
 // Mirrors src-tauri/src/library/chosen_files.rs; keep them in step.
-import { copyFileSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { copyFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fingerprint, isTextMime, readText } from './original-files.mjs';
 
 const TOKEN_LIFETIME = 60 * 60 * 1000, MAX_TOKENS = 200, MAX_FILES = 10;
-// Chosen files must be reasonable to hand to an AI conversation (same as chosen_files.rs).
-const MAX_FILE_BYTES = 30 * 1024 * 1024, STAGED_CHARACTERS = 50_000;
+// Same bounds as chosen_files.rs. Native imports never send file bytes through the App.
+const MAX_FILE_BYTES = 512 * 1024 * 1024, MAX_BATCH_BYTES = 1024 * 1024 * 1024, STAGED_CHARACTERS = 50_000;
 
 // Same table as Rust's file_kind.
 const KINDS = {
+  mp4: ['file', 'video/mp4'], mov: ['file', 'video/quicktime'], webm: ['file', 'video/webm'], avi: ['file', 'video/x-msvideo'],
   png: ['image', 'image/png'], jpg: ['image', 'image/jpeg'], jpeg: ['image', 'image/jpeg'], gif: ['image', 'image/gif'],
   webp: ['image', 'image/webp'], svg: ['image', 'image/svg+xml'], pdf: ['pdf', 'application/pdf'],
   docx: ['file', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], doc: ['file', 'application/msword'],
@@ -46,41 +48,49 @@ export function createChosenFiles() {
   return {
     describe(paths) {
       if (!Array.isArray(paths) || paths.length > MAX_FILES) throw Error('Choose up to 10 files at a time.');
+      let total = 0;
       return paths.map(raw => {
         let path, stat;
         try { path = realpathSync(raw); stat = statSync(path); } catch { throw Error('A chosen file could not be read.'); }
         if (!stat.isFile()) throw Error('Choose files, not folders.');
-        if (stat.size > MAX_FILE_BYTES) throw Error('Choose files under 30 MB.');
+        if (stat.size > MAX_FILE_BYTES) throw Error('Choose files up to 512 MB each.');
+        total += stat.size;
+        if (total > MAX_BATCH_BYTES) throw Error('Choose files up to 1 GB in total.');
         const [, mimeType] = fileKind(path);
         return { content: staged(path, mimeType), token: remember(path), name: basename(path), size: stat.size, mimeType };
       });
     },
     /** Copies each chosen original into the library and returns rows for insert(). */
-    prepare(drafts, assets, raster) {
+    async prepare(drafts, assets, raster) {
       if (!Array.isArray(drafts) || !drafts.length || drafts.length > MAX_FILES) throw Error('Choose 1 to 10 files.');
       const inputs = drafts.map(draft => {
         if (typeof draft?.title !== 'string' || !draft.title.trim() || draft.title.length > 500 || typeof draft.content !== 'string' || Array.from(draft.content).length > STAGED_CHARACTERS) throw Error('Check the file title and content, then retry.');
         return { draft, original: pathFor(draft.token) };
       });
       const written = [];
+      let total = 0;
+      const rows = [];
       try {
-        return inputs.map(({ draft, original }) => {
+        for (const { draft, original } of inputs) {
           const current = fingerprint(original);
           if (!current) throw Error('A chosen file is no longer available. Choose it again.');
-          if (current.size > MAX_FILE_BYTES) throw Error('Choose files under 30 MB.');
+          if (current.size > MAX_FILE_BYTES) throw Error('Choose files up to 512 MB each.');
+          total += current.size;
+          if (total > MAX_BATCH_BYTES) throw Error('Choose files up to 1 GB in total.');
           const name = Array.from(basename(original)).slice(0, 150).join('').replace(/[<>:"/\\|?*\x00-\x1f]/g, '-');
           const folder = join(assets, randomUUID()); mkdirSync(folder, { recursive: true }); written.push(folder);
           const backup = join(folder, name);
-          copyFileSync(original, backup);
+          await copyFile(original, backup);
           const [kind, mimeType] = fileKind(original);
           // Unedited text stays derived from the file and follows later edits.
           const edited = draft.content !== staged(backup, mimeType);
           const content = edited ? draft.content || null : isTextMime(mimeType) ? readText(backup) : null;
           const image = kind === 'image' && current.size <= 20_000_000 ? raster(`data:${mimeType};base64,${readFileSync(backup).toString('base64')}`) : undefined;
-          return { kind, title: draft.title.trim(), content, preview: draft.preview, image, backup, original, mimeType, size: current.size,
+          rows.push({ kind, title: draft.title.trim(), content, preview: draft.preview, image, backup, original, mimeType, size: current.size,
             excerpt: content ? Array.from(content.split(/\s+/).filter(Boolean).join(' ')).slice(0, 180).join('') : `${mimeType} · ${formatSize(current.size)}`,
-            origin: { platform: 'Local file', importMethod: 'local_file', fileName: name, originalFingerprint: current, ...(edited ? { contentEdited: true } : {}) } };
-        });
+            origin: { platform: 'Local file', importMethod: 'local_file', fileName: name, originalFingerprint: current, ...(edited ? { contentEdited: true } : {}) } });
+        }
+        return rows;
       } catch (error) { for (const folder of written) rmSync(folder, { recursive: true, force: true }); throw error; }
     },
   };

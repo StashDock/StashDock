@@ -34,6 +34,19 @@ test('plugin update check only compares the package built for this computer', as
     { status: 'available', version: '0.6.0', url: `https://github.com/${repository}/releases/tag/plugin-v0.6.0` });
 });
 
+test('DSH checks its own platform asset without treating ChatGPT releases as updates', async () => {
+  const releases = [
+    release('v1.4.0', ['stashdock-plugin-1.4.0-win32-x64.zip']),
+    release('v1.3.0', ['stashdock-dsh-1.3.0-darwin-arm64.tgz']),
+    release('v1.2.0', ['stashdock-dsh-1.2.0-win32-x64.tgz']),
+  ];
+  const options = { repository, current: '1.1.0', target: 'win32-x64', pluginKind: 'dsh' };
+  assert.deepEqual(await checkPluginUpdates({ ...options, fetchImpl: answer(releases) }),
+    { status: 'available', version: '1.2.0', url: `https://github.com/${repository}/releases/tag/v1.2.0` });
+  assert.equal((await checkPluginUpdates({ ...options, fetchImpl: answer(releases.slice(0, 2)) })).status, 'unconfigured');
+  assert.equal((await checkPluginUpdates({ ...options, pluginKind: 'chatgpt', fetchImpl: answer(releases) })).version, '1.4.0');
+});
+
 test('plugin update check ignores foreign pages and reports no release honestly', async () => {
   const foreign = [{ html_url: 'https://evil.example/releases/x', assets: [{ name: 'stashdock-plugin-9.0.0-win32-x64.zip' }] }];
   assert.equal((await checkPluginUpdates({ repository, current: '0.4.28', fetchImpl: answer(foreign) })).status, 'unconfigured');

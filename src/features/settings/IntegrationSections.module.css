@@ -5,6 +5,7 @@
 .icon { width: 24px; height: 24px; flex: none; object-fit: contain; }
 .icon[data-integration-icon="codex"] { width: 24px; height: 24px; padding: 2px; }
 :root[data-theme="dark"] .icon[data-integration-icon="codex"] { filter: invert(1); }
+:root[data-theme="dark"] .icon[data-integration-icon="desktop"] { filter: invert(1); }
 .identity { flex: 1; min-width: 0; white-space: nowrap; }
 .actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); flex: none; margin-inline-start: auto; }
 .status { color: var(--text-muted); font-size: var(--text-xs); white-space: nowrap; }
@@ -18,7 +19,9 @@
 .githubIcon { width: 16px; height: 16px; flex: none; }
 :root[data-theme="dark"] .githubIcon { filter: invert(1); }
 .footer .icon[data-integration-icon="codex"] { filter: invert(1); }
+.footer .icon[data-integration-icon="desktop"] { filter: invert(1); }
 :root[data-theme="dark"] .footer .icon[data-integration-icon="codex"] { filter: none; }
+:root[data-theme="dark"] .footer .icon[data-integration-icon="desktop"] { filter: none; }
 .srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @container settings (max-width: 560px) {
   .row { padding: var(--space-4); flex-wrap: wrap; }

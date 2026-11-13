@@ -12,13 +12,7 @@
   {
     "name": "note projection remains available when originals are not delivered",
     "items": [{ "id": "note", "title": "Rules", "kind": "note", "source": "Personal note", "assetPath": "D:/private/Rules.txt", "excerpt": "", "content": "Review keyboard behavior.", "tags": ["UX"], "createdAt": "2026-10-18", "origin": { "fileName": "Rules.txt" } }],
-    "expected": "# StashDock context\n\n## Rules\nFile: Rules.txt\nTags: UX\n\n### Note text\nReview keyboard behavior."
-  },
-  {
-    "name": "native delivery avoids repeating the attached note body",
-    "originalFilesDelivered": true,
-    "items": [{ "id": "note", "title": "Rules", "kind": "note", "source": "Personal note", "assetPath": "D:/private/Rules.txt", "excerpt": "", "content": "Review keyboard behavior.", "tags": ["UX"], "createdAt": "2026-10-18", "origin": { "fileName": "Rules.txt" } }],
-    "expected": "# StashDock context\n\n## Rules\nFile: Rules.txt\nTags: UX"
+    "expected": "# StashDock context\n\n## Rules\nTags: UX\n\n### Note text\nReview keyboard behavior."
   },
   {
     "name": "summary and selected text do not claim a complete page",
@@ -32,7 +26,6 @@
   },
   {
     "name": "intentional empty final context is never regenerated",
-    "originalFilesDelivered": true,
     "items": [{ "id": "empty", "title": "Empty", "kind": "note", "source": "Personal note", "excerpt": "Old text", "tags": [], "createdAt": "2026-10-18", "contextOverride": "" }],
     "expected": ""
   }

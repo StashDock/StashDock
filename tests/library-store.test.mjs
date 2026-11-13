@@ -14,6 +14,17 @@ new Function('module', 'exports', result.outputFiles[0].text)(module, module.exp
 const { createLibraryStore, buildSearchIndex, filterItems, selectItems, summarizeItems, buildContext } = module.exports;
 const item = (id, overrides = {}) => ({ id, title: id, kind: 'web', source: 'Example', url: `https://example.com/${id}`, excerpt: 'reference', tags: ['Design'], createdAt: new Date().toISOString(), ...overrides });
 
+test('Desktop loads shared ordering, commits menu changes and retains the preference on failed writes', async () => {
+  let order = 'oldest', fail = false;
+  const store = createLibraryStore({ load: async () => [item('a')], loadSort: async () => order,
+    saveSort: async value => { if (fail) throw Error('disk failed'); order = value; }, add: async () => {}, remove: async () => {}, favorite: async () => {} });
+  await store.refresh(); assert.equal(store.getSnapshot().sort, 'oldest');
+  await store.setSort('most-used'); assert.equal(order, 'most-used');
+  fail = true; await assert.rejects(store.setSort('newest'), /disk failed/);
+  assert.equal(store.getSnapshot().sort, 'most-used');
+  order = 'newest'; await store.refresh(); assert.equal(store.getSnapshot().sort, 'newest');
+});
+
 test('confirmed link replacement uses the replacement adapter and the new final context', async () => {
   const old = item('saved', { contextOverride: 'Old final context', content: 'Old body', favorite: true, preview: 'old-cover' });
   let written;

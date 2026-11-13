@@ -40,7 +40,7 @@ export async function integrationDestination(id, { platform = process.platform, 
       if (path) return { target: path, fallback: target.website };
     }
     for (const scheme of target.protocols || []) {
-      if (await readRegistry(`HKCR\\${scheme}\\shell\\open\\command`) !== null) return { target: `${scheme}://`, fallback: target.website };
+      if (await readRegistry(`HKCR\\${scheme}\\shell\\open\\command`) !== null) return { target: target.launchUrl || `${scheme}://`, fallback: target.website };
     }
     if (target.executable) for (const root of ['HKCU', 'HKLM']) {
       const raw = await readRegistry(`${root}\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${target.executable}`, '');

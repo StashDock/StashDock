@@ -308,7 +308,7 @@ mod tests {
         let refreshed = connection.query_row(&format!("SELECT {} FROM stash_items WHERE id=?1", super::super::ITEM_COLUMNS), [id], super::super::row_to_item).unwrap();
         assert!(refreshed.preview.is_none());
         assert_eq!(refreshed.kind, "repo");
-        let context = super::super::context::build(&[refreshed], false).unwrap();
+        let context = super::super::context::build(&[refreshed]).unwrap();
         assert!(context.contains("New body"));
         assert!(!context.contains("User context"));
         connection

@@ -15,8 +15,9 @@ import { GitHubMark } from '../settings/GitHubMark';
 import { UpdateDialog, versionLabel, type UpdateInfo } from '../settings/UpdateDialog';
 import type { IntegrationInfo } from '../settings/integrations';
 
-export default function McpSettingsView({ onClose, onOpenLink, onLibraryMoved }: { onClose: () => void; onOpenLink: (url: string) => Promise<unknown>; onLibraryMoved: () => void }) {
+export default function McpSettingsView({ onClose, onOpenLink, onLibraryMoved, dsh }: { onClose: () => void; onOpenLink: (url: string) => Promise<unknown>; onLibraryMoved: () => void; dsh: boolean }) {
   const { info, loading, pending, error, reload, save, call } = useMcpSettings();
+  const product = dsh ? 'StashDock for DeepSeek Harness' : 'StashDock for ChatGPT';
   const loadIntegrations = useCallback(async () => (await call('get_stashdock_integrations')).integrations as IntegrationInfo, [call]);
   const { t } = useI18n();
   const [busy, setBusy] = useState(false), [operationError, setOperationError] = useState(''), [checkingUpdates, setCheckingUpdates] = useState(false);
@@ -33,10 +34,10 @@ export default function McpSettingsView({ onClose, onOpenLink, onLibraryMoved }:
       <StorageSection services={storageServices} onBusyChange={setBusy} onMoved={onLibraryMoved} />
       <IntegrationSections host="codex" load={loadIntegrations} openLink={onOpenLink} openApp={id => call('open_stashdock_integration', { id }, 45_000)} disabled={busy} />
       <section className={styles.section} aria-labelledby="settings-about"><h2 id="settings-about">{t('About')}</h2><div className={styles.group}>
-        <SettingsRow title="StashDock for ChatGPT" meta={versionLabel(info.version)} icon={<IntegrationIcon id="codex" />}><Button variant="secondary" size="sm" disabled={busy} onClick={() => setCheckingUpdates(true)}><RefreshCw size={16} strokeWidth={1.75} aria-hidden="true" />{t('Check for updates')}</Button></SettingsRow>
+        <SettingsRow title={product} meta={versionLabel(info.version)} icon={<IntegrationIcon id={dsh ? 'desktop' : 'codex'} />}><Button variant="secondary" size="sm" disabled={busy} onClick={() => setCheckingUpdates(true)}><RefreshCw size={16} strokeWidth={1.75} aria-hidden="true" />{t('Check for updates')}</Button></SettingsRow>
         {info.githubUrl && <SettingsRow title="GitHub" icon={<GitHubMark />}><Button variant="ghost" size="sm" onClick={() => { setOperationError(''); void onOpenLink(info.githubUrl!).catch(reason => setOperationError(errorText(reason))); }}>{t('Open')}<ExternalLink size={16} strokeWidth={1.75} aria-hidden="true" /></Button></SettingsRow>}
       </div><Alert tone="danger" title={t('Try again.')} open={Boolean(operationError)}>{t(operationError)}</Alert></section>
-      <UpdateDialog open={checkingUpdates} product="StashDock for ChatGPT" version={info.version} check={checkUpdates} onClose={() => setCheckingUpdates(false)} openLink={onOpenLink} />
+      <UpdateDialog open={checkingUpdates} product={product} version={info.version} check={checkUpdates} onClose={() => setCheckingUpdates(false)} openLink={onOpenLink} />
     </>}
   </SettingsFrame>;
 }

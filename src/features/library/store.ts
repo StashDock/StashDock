@@ -2,10 +2,13 @@ import type { StashItem } from "../../types";
 import { uniqueImports } from "./selectors";
 import { canonicalizeUrl } from "../../lib/canonical-url";
 import { reconcileReferences } from '../../lib/reconcileReferences';
+import { normalizeReferenceSort, type ReferenceSort } from '../../lib/reference-sort.mjs';
 import { editReferenceCover, type ReferenceCoverEdit } from '../../lib/referenceCover';
 
 export type LibraryRepository = {
   load: () => Promise<StashItem[]>;
+  loadSort?: () => Promise<ReferenceSort>;
+  saveSort?: (sort: ReferenceSort) => Promise<void>;
   /** The listed references that still exist; ones it leaves out were deleted. */
   loadSome?: (ids: string[]) => Promise<StashItem[]>;
   add: (items: StashItem[], next: StashItem[]) => Promise<void | StashItem[]>;
@@ -18,7 +21,7 @@ export type LibraryRepository = {
   changeTag?: (name: string, replacement: string | null, next: StashItem[]) => Promise<StashItem[]>;
 };
 export type ImportSummary = { imported: number; updated: number; skipped: number };
-export type LibrarySnapshot = { items: StashItem[]; ready: boolean; error: string | null; importNotice: { message: string } | null };
+export type LibrarySnapshot = { items: StashItem[]; sort: ReferenceSort; ready: boolean; error: string | null; importNotice: { message: string } | null };
 
 export function cleanReferenceTags(tags: string[]) {
   if (tags.length > 12 || tags.some(tag => tag.trim().length > 48)) throw new Error('Use at most 12 tags, each up to 48 characters.');
@@ -32,16 +35,16 @@ export function contentExcerpt(content: string) {
 
 /** One source of truth per WebView. All reads and mutations share an ordered queue. */
 export function createLibraryStore(repository: LibraryRepository) {
-  let snapshot: LibrarySnapshot = { items: [], ready: false, error: null, importNotice: null };
+  let snapshot: LibrarySnapshot = { items: [], sort: 'newest', ready: false, error: null, importNotice: null };
   const listeners = new Set<() => void>();
   let queue: Promise<unknown> = Promise.resolve();
   let refreshFlight: Promise<void> | null = null;
   let invalidated = false;
-  const publish = (items: StashItem[], error: string | null = null) => {
+  const publish = (items: StashItem[], error: string | null = null, sort = snapshot.sort) => {
     const reconciled = reconcileReferences(snapshot.items, items);
     const unchanged = reconciled === snapshot.items;
-    if (snapshot.ready && unchanged && error === snapshot.error) return;
-    snapshot = { ...snapshot, items: unchanged ? snapshot.items : reconciled, ready: true, error };
+    if (snapshot.ready && unchanged && error === snapshot.error && sort === snapshot.sort) return;
+    snapshot = { ...snapshot, sort, items: unchanged ? snapshot.items : reconciled, ready: true, error };
     listeners.forEach(listener => listener());
   };
   const enqueue = <T,>(operation: () => Promise<T>): Promise<T> => {
@@ -54,7 +57,10 @@ export function createLibraryStore(repository: LibraryRepository) {
     refreshFlight = enqueue(async () => {
       do {
         invalidated = false;
-        try { publish(await repository.load()); }
+        try {
+          const [items, sort] = await Promise.all([repository.load(), repository.loadSort?.() ?? snapshot.sort]);
+          publish(items, null, normalizeReferenceSort(sort));
+        }
         catch (error) { publish(snapshot.items, error instanceof Error ? error.message : "The library could not be opened."); }
       } while (invalidated);
     }).finally(() => { refreshFlight = null; });
@@ -64,6 +70,10 @@ export function createLibraryStore(repository: LibraryRepository) {
     getSnapshot: () => snapshot,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     refresh,
+    setSort: (sort: ReferenceSort) => enqueue(async () => {
+      await repository.saveSort?.(sort);
+      publish(snapshot.items, null, sort);
+    }),
     invalidate: () => { invalidated = true; return refresh(); },
     /** Re-read only these references (for example after a background cover update). */
     patch: (ids: string[]) => {

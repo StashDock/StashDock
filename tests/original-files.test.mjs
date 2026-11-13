@@ -119,23 +119,6 @@ test('MCP system-dialog imports reference the original, keep only tokens in the 
   assert.equal(bogus.isError, true);
 });
 
-test('notes record their file fingerprint so unchanged notes are not read again, and edits are still seen', t => {
-  const root = mkdtempSync(join(tmpdir(), 'stashdock-note-fingerprint-'));
-  const library = createLocalLibrary({ dataDir: root });
-  const note = library.saveContextReference({ title: 'Rules', content: 'First body', tags: [] }).item;
-  library.readItems([note.id]);
-  const db = new DatabaseSync(join(root, 'stashdock.sqlite3'));
-  t.after(() => { db.close(); library.close(); rmSync(root, { recursive: true, force: true }); });
-  const origin = () => JSON.parse(db.prepare('SELECT origin_json FROM stash_items WHERE id=?').get(note.id).origin_json);
-  assert.deepEqual(origin().fileFingerprint, fingerprint(note.assetPath));
-  // A passive read with an unchanged fingerprint needs no writer: it succeeds while another connection holds one.
-  db.exec('BEGIN IMMEDIATE');
-  try { assert.equal(library.readItems([note.id])[0].content, 'First body'); } finally { db.exec('ROLLBACK'); }
-  writeFileSync(note.assetPath, 'Second body, edited outside'); utimesSync(note.assetPath, Date.now() / 1000 + 5, Date.now() / 1000 + 5);
-  assert.equal(library.readItems([note.id])[0].content, 'Second body, edited outside');
-  assert.deepEqual(origin().fileFingerprint, fingerprint(note.assetPath));
-});
-
 test('a library copied elsewhere finds its backups again (same cases as asset_paths.rs)', async t => {
   const { tailAfterAssets } = await import('../plugins/stashdock/server/asset-paths.mjs');
   const contract = JSON.parse(readFileSync(new URL('./fixtures/asset-paths.json', import.meta.url), 'utf8'));
